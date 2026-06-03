@@ -10,12 +10,14 @@
  *   - invalid rows   (missing `name`)
  */
 
-import type { Clinic } from '../types/admin'
+import type { Clinic, ClinicType } from '../types/admin'
+
+const VALID_CLINIC_TYPES = new Set<string>(['human', 'veterinary', 'both', ''])
 
 // ── Column order ──────────────────────────────────────────────────────────────
 
 export const CLINIC_CSV_COLUMNS = [
-  'id', 'name', 'address', 'city', 'country', 'phone', 'website', 'verified',
+  'id', 'name', 'address', 'city', 'country', 'phone', 'website', 'clinicType', 'verified',
 ] as const
 
 type ClinicCsvCol = typeof CLINIC_CSV_COLUMNS[number]
@@ -92,7 +94,7 @@ function parseCSVText(text: string): Record<string, string>[] {
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
-export type ClinicImportData = Omit<Clinic, 'id' | 'Created'> & { id?: string }
+export type ClinicImportData = Omit<Clinic, 'id' | 'Created'> & { id?: string; clinicType: ClinicType }
 
 export interface ClinicParseRow {
   data:     ClinicImportData
@@ -120,21 +122,28 @@ export function parseClinicCSV(text: string): ClinicParseResult {
   const errors:  ClinicParseError[] = []
 
   rawRows.forEach((raw, idx) => {
-    const rowNum = idx + 1
-    const name   = raw['name']?.trim()
+    const rowNum   = idx + 1
+    const name     = raw['name']?.trim()
     if (!name) {
       errors.push({ rowNumber: rowNum, reason: 'Missing name (required)', raw })
       return
     }
 
+    const rawType = raw['clinicType']?.trim() ?? ''
+    if (rawType && !VALID_CLINIC_TYPES.has(rawType)) {
+      errors.push({ rowNumber: rowNum, reason: `Invalid clinicType "${rawType}". Must be: human, veterinary, both, or blank.`, raw })
+      return
+    }
+
     const data: ClinicImportData = {
       name,
-      address:  raw['address']  ?? '',
-      city:     raw['city']     ?? '',
-      country:  raw['country']  ?? '',
-      phone:    raw['phone']    ?? '',
-      website:  raw['website']  ?? '',
-      verified: raw['verified']?.toLowerCase() === 'true',
+      address:    raw['address']  ?? '',
+      city:       raw['city']     ?? '',
+      country:    raw['country']  ?? '',
+      phone:      raw['phone']    ?? '',
+      website:    raw['website']  ?? '',
+      clinicType: (rawType || 'human') as ClinicType,
+      verified:   raw['verified']?.toLowerCase() === 'true',
     }
 
     const rawId = raw['id']?.trim()

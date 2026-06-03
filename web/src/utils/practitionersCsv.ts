@@ -8,13 +8,15 @@
  *   verificationLevel must be 0-4 if provided.
  */
 
-import type { Practitioner } from '../types/admin'
+import type { Practitioner, PractitionerType } from '../types/admin'
+
+const VALID_PRACTITIONER_TYPES = new Set<string>(['human', 'veterinary', ''])
 
 // ── Column order ──────────────────────────────────────────────────────────────
 
 export const PRACTITIONER_CSV_COLUMNS = [
   'id', 'name', 'email', 'clinicId', 'clinicName', 'speciality',
-  'verificationLevel', 'active',
+  'practitionerType', 'verificationLevel', 'active',
 ] as const
 
 type PractitionerCsvCol = typeof PRACTITIONER_CSV_COLUMNS[number]
@@ -93,7 +95,7 @@ function parseCSVText(text: string): Record<string, string>[] {
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
-export type PractitionerImportData = Omit<Practitioner, 'id' | 'Created' | 'uid' | 'verifiedBy' | 'verifiedAt'> & { id?: string }
+export type PractitionerImportData = Omit<Practitioner, 'id' | 'Created' | 'uid' | 'verifiedBy' | 'verifiedAt'> & { id?: string; practitionerType: PractitionerType }
 
 export interface PractitionerParseRow {
   data:     PractitionerImportData
@@ -144,12 +146,19 @@ export function parsePractitionerCSV(text: string): PractitionerParseResult {
 
     const level = rawLevel ? (parseInt(rawLevel, 10) as Practitioner['verificationLevel']) : 0
 
+    const rawPType = raw['practitionerType']?.trim() ?? ''
+    if (rawPType && !VALID_PRACTITIONER_TYPES.has(rawPType)) {
+      errors.push({ rowNumber: rowNum, reason: `Invalid practitionerType "${rawPType}". Must be: human, veterinary, or blank.`, raw })
+      return
+    }
+
     const data: PractitionerImportData = {
       name,
       email,
-      clinicId:          raw['clinicId']   ?? '',
-      clinicName:        raw['clinicName'] ?? '',
-      speciality:        raw['speciality'] ?? '',
+      clinicId:          raw['clinicId']        ?? '',
+      clinicName:        raw['clinicName']       ?? '',
+      speciality:        raw['speciality']       ?? '',
+      practitionerType:  (rawPType || 'human') as PractitionerType,
       verificationLevel: level,
       active:            raw['active']?.toLowerCase() !== 'false',
     }

@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import { getClinics, addClinic, updateClinic, deleteClinic, bulkUpsertClinicsById } from '../services/clinicsService'
 import { downloadClinicCSV, parseClinicCSV } from '../utils/clinicsCsv'
 import type { ClinicParseResult } from '../utils/clinicsCsv'
-import type { Clinic } from '../types/admin'
+import type { Clinic, ClinicType } from '../types/admin'
+import { CLINIC_TYPE_LABELS, CLINIC_TYPE_COLOURS } from '../types/admin'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
 import { useIsLg } from '../hooks/useMediaQuery'
 
-const EMPTY_FORM = { name: '', address: '', city: '', country: '', phone: '', website: '', verified: false }
+const EMPTY_FORM = { name: '', address: '', city: '', country: '', phone: '', website: '', clinicType: 'human' as ClinicType, verified: false }
 
 // ── Import confirmation modal ─────────────────────────────────────────────────
 
@@ -159,6 +160,28 @@ function ClinicForm({
       </div>
       <Input label="Phone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} type="tel" placeholder="+254 700 000000" />
       <Input label="Website" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="https://clinic.example.com" />
+
+      {/* Clinic type */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Clinic Type *</label>
+        <div className="grid grid-cols-3 gap-2">
+          {(['human', 'veterinary', 'both'] as ClinicType[]).map(t => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, clinicType: t }))}
+              className={`py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                form.clinicType === t
+                  ? CLINIC_TYPE_COLOURS[t] + ' border-current'
+                  : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-transparent hover:bg-gray-100 dark:hover:bg-gray-600'
+              }`}
+            >
+              {t === 'human' ? '🏥 Human' : t === 'veterinary' ? '🐾 Veterinary' : '🏥🐾 Both'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <label className="flex items-center gap-3 cursor-pointer pt-1">
         <div
           onClick={() => setForm(f => ({ ...f, verified: !f.verified }))}
@@ -185,6 +208,7 @@ export function AdminClinicsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [countryFilter, setCountryFilter] = useState<string>('all')
+  const [typeFilter, setTypeFilter] = useState<ClinicType | 'all'>('all')
   const [verifiedFilter, setVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isNew, setIsNew] = useState(false)
@@ -207,7 +231,7 @@ export function AdminClinicsPage() {
   function openEdit(c: Clinic) {
     setIsNew(false)
     setSelectedId(c.id)
-    setForm({ name: c.name, address: c.address, city: c.city, country: c.country, phone: c.phone, website: c.website, verified: c.verified })
+    setForm({ name: c.name, address: c.address, city: c.city, country: c.country, phone: c.phone, website: c.website, clinicType: c.clinicType ?? 'human', verified: c.verified })
   }
   function closeDetail() { setSelectedId(null); setIsNew(false) }
 
@@ -267,6 +291,7 @@ export function AdminClinicsPage() {
 
   const filtered = clinics.filter(c => {
     if (countryFilter !== 'all' && c.country !== countryFilter) return false
+    if (typeFilter !== 'all' && (c.clinicType ?? 'human') !== typeFilter) return false
     if (verifiedFilter === 'verified'   && !c.verified) return false
     if (verifiedFilter === 'unverified' &&  c.verified) return false
     const q = search.toLowerCase()
@@ -343,6 +368,28 @@ export function AdminClinicsPage() {
           </div>
         )}
 
+        {/* Clinic type filter */}
+        <div className="flex gap-1.5 flex-wrap">
+          <button
+            onClick={() => setTypeFilter('all')}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${typeFilter === 'all' ? 'bg-gray-700 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+          >
+            All types
+          </button>
+          {(['human', 'veterinary', 'both'] as ClinicType[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                typeFilter === t ? CLINIC_TYPE_COLOURS[t] + ' ring-1 ring-current' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              {t === 'human' ? '🏥 Human' : t === 'veterinary' ? '🐾 Vet' : '🏥🐾 Both'}
+              <span className="opacity-60 ml-1">{clinics.filter(c => (c.clinicType ?? 'human') === t).length}</span>
+            </button>
+          ))}
+        </div>
+
         {/* Verified filter */}
         <div className="flex gap-1.5">
           {(['all', 'verified', 'unverified'] as const).map(v => (
@@ -389,6 +436,9 @@ export function AdminClinicsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-gray-900 dark:text-white truncate">{c.name}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${CLINIC_TYPE_COLOURS[c.clinicType ?? 'human']}`}>
+                      {c.clinicType === 'veterinary' ? '🐾 Vet' : c.clinicType === 'both' ? '🏥🐾 Both' : '🏥 Human'}
+                    </span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${c.verified ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
                       {c.verified ? '✓ Verified' : 'Unverified'}
                     </span>

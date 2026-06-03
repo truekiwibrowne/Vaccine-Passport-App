@@ -3,8 +3,8 @@ import { getPractitioners, addPractitioner, updatePractitioner, deletePractition
 import { getClinics } from '../services/clinicsService'
 import { downloadPractitionerCSV, parsePractitionerCSV } from '../utils/practitionersCsv'
 import type { PractitionerParseResult } from '../utils/practitionersCsv'
-import type { Practitioner, Clinic } from '../types/admin'
-import { VERIFICATION_LEVEL_LABELS, VERIFICATION_LEVEL_COLOURS } from '../types/admin'
+import type { Practitioner, Clinic, PractitionerType } from '../types/admin'
+import { VERIFICATION_LEVEL_LABELS, VERIFICATION_LEVEL_COLOURS, PRACTITIONER_TYPE_LABELS, PRACTITIONER_TYPE_COLOURS } from '../types/admin'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
@@ -13,6 +13,7 @@ import { useIsLg } from '../hooks/useMediaQuery'
 
 const EMPTY_FORM = {
   name: '', email: '', clinicId: '', clinicName: '', speciality: '',
+  practitionerType: 'human' as PractitionerType,
   verificationLevel: 0 as Practitioner['verificationLevel'],
   verifiedBy: '', verifiedAt: '', active: true,
 }
@@ -168,6 +169,7 @@ export function AdminPractitionersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [countryFilter, setCountryFilter] = useState<string>('all')
+  const [typeFilter, setTypeFilter] = useState<PractitionerType | 'all'>('all')
   const [specialityFilter, setSpecialityFilter] = useState<string>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isNew, setIsNew] = useState(false)
@@ -198,13 +200,21 @@ export function AdminPractitionersPage() {
   function openEdit(p: Practitioner) {
     setIsNew(false)
     setSelectedId(p.id)
-    setForm({ name: p.name, email: p.email, clinicId: p.clinicId, clinicName: p.clinicName, speciality: p.speciality, verificationLevel: p.verificationLevel, verifiedBy: p.verifiedBy, verifiedAt: p.verifiedAt, active: p.active })
+    setForm({ name: p.name, email: p.email, clinicId: p.clinicId, clinicName: p.clinicName, speciality: p.speciality, practitionerType: p.practitionerType ?? 'human', verificationLevel: p.verificationLevel, verifiedBy: p.verifiedBy, verifiedAt: p.verifiedAt, active: p.active })
   }
   function closeDetail() { setSelectedId(null); setIsNew(false) }
 
   function handleClinicSelect(e: React.ChangeEvent<HTMLSelectElement>) {
     const clinic = clinics.find(c => c.id === e.target.value)
-    setForm(f => ({ ...f, clinicId: clinic?.id ?? '', clinicName: clinic?.name ?? '' }))
+    setForm(f => ({
+      ...f,
+      clinicId:   clinic?.id   ?? '',
+      clinicName: clinic?.name ?? '',
+      // Auto-suggest practitioner type based on clinic type
+      practitionerType: clinic?.clinicType === 'veterinary' ? 'veterinary'
+        : clinic?.clinicType === 'human'     ? 'human'
+        : f.practitionerType,
+    }))
   }
 
   async function save() {
@@ -293,6 +303,7 @@ export function AdminPractitionersPage() {
   const filtered = practitioners.filter(p => {
     const practCountry = clinicCountryMap[p.clinicId] ?? ''
     if (countryFilter !== 'all' && practCountry !== countryFilter) return false
+    if (typeFilter !== 'all' && (p.practitionerType ?? 'human') !== typeFilter) return false
     if (specialityFilter !== 'all' && p.speciality !== specialityFilter) return false
     const q = search.toLowerCase()
     return !q ||
@@ -374,6 +385,31 @@ export function AdminPractitionersPage() {
           </div>
         )}
 
+        {/* Practitioner type filter */}
+        <div>
+          <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">Type</p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setTypeFilter('all')}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${typeFilter === 'all' ? 'bg-gray-700 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+            >
+              All
+            </button>
+            {(['human', 'veterinary'] as PractitionerType[]).map(t => (
+              <button
+                key={t}
+                onClick={() => setTypeFilter(t)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  typeFilter === t ? PRACTITIONER_TYPE_COLOURS[t] + ' ring-1 ring-current' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >
+                {t === 'human' ? '🏥 Human' : '🐾 Veterinary'}
+                <span className="opacity-60 ml-1">{practitioners.filter(p => (p.practitionerType ?? 'human') === t).length}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Speciality / discipline filter */}
         {specialities.length > 0 && (
           <div>
@@ -432,6 +468,9 @@ export function AdminPractitionersPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-gray-900 dark:text-white truncate">{p.name}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${PRACTITIONER_TYPE_COLOURS[p.practitionerType ?? 'human']}`}>
+                      {(p.practitionerType ?? 'human') === 'veterinary' ? '🐾 Vet' : '🏥 Human'}
+                    </span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${VERIFICATION_LEVEL_COLOURS[p.verificationLevel]}`}>
                       L{p.verificationLevel} · {VERIFICATION_LEVEL_LABELS[p.verificationLevel]}
                     </span>
@@ -508,6 +547,27 @@ export function AdminPractitionersPage() {
         <Input label="Full Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Dr. Jane Smith" />
         <Input label="Email *" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="doctor@clinic.com" />
         <Input label="Speciality / Discipline" value={form.speciality} onChange={e => setForm(f => ({ ...f, speciality: e.target.value }))} placeholder="General Practitioner" />
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Practitioner Type *</label>
+          <div className="grid grid-cols-2 gap-2">
+            {(['human', 'veterinary'] as PractitionerType[]).map(t => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setForm(f => ({ ...f, practitionerType: t }))}
+                className={`py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
+                  form.practitionerType === t
+                    ? PRACTITIONER_TYPE_COLOURS[t] + ' border-current'
+                    : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-transparent hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
+              >
+                {t === 'human' ? '🏥 Human Medicine' : '🐾 Veterinary'}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{PRACTITIONER_TYPE_LABELS[form.practitionerType]}</p>
+        </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Associated Clinic</label>

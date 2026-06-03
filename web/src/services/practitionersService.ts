@@ -12,6 +12,21 @@ export async function getPractitioners(): Promise<Practitioner[]> {
   return snap.docs.map(d => ({ ...d.data(), id: d.id }) as Practitioner)
 }
 
+/**
+ * Return only active practitioners appropriate for the given vaccine context.
+ * Legacy docs without practitionerType default to 'human'.
+ */
+export async function getPractitionersForVaccineType(
+  vaccineType: 'human' | 'veterinary',
+): Promise<Practitioner[]> {
+  const all = await getPractitioners()
+  return all.filter(p => {
+    if (!p.active) return false
+    const pt = p.practitionerType ?? 'human'
+    return pt === vaccineType
+  })
+}
+
 export async function getPractitionerByEmail(email: string): Promise<Practitioner | null> {
   const snap = await getDocs(
     query(collection(db, 'Practitioners'), where('email', '==', email.toLowerCase()), where('active', '==', true))

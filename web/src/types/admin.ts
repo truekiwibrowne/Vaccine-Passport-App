@@ -1,3 +1,18 @@
+/** Whether the clinic serves human patients, animals, or both. */
+export type ClinicType = 'human' | 'veterinary' | 'both'
+
+export const CLINIC_TYPE_LABELS: Record<ClinicType, string> = {
+  human:       'Human Medicine',
+  veterinary:  'Veterinary',
+  both:        'Human & Veterinary',
+}
+
+export const CLINIC_TYPE_COLOURS: Record<ClinicType, string> = {
+  human:       'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  veterinary:  'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  both:        'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+}
+
 export interface Clinic {
   id: string
   name: string
@@ -6,8 +21,23 @@ export interface Clinic {
   country: string
   phone: string
   website: string
+  /** Defaults to 'human' for legacy records without this field. */
+  clinicType?: ClinicType
   verified: boolean
   Created: string
+}
+
+/** Whether a practitioner works with humans, animals, or is a veterinarian. */
+export type PractitionerType = 'human' | 'veterinary'
+
+export const PRACTITIONER_TYPE_LABELS: Record<PractitionerType, string> = {
+  human:      'Human Medicine',
+  veterinary: 'Veterinary',
+}
+
+export const PRACTITIONER_TYPE_COLOURS: Record<PractitionerType, string> = {
+  human:      'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  veterinary: 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300',
 }
 
 export interface Practitioner {
@@ -19,6 +49,8 @@ export interface Practitioner {
   clinicId: string
   clinicName: string
   speciality: string
+  /** Defaults to 'human' for legacy records without this field. */
+  practitionerType?: PractitionerType
   /** 0 = unregistered, 1 = self-registered, 2 = clinic-verified, 3 = gov/board, 4 = highest-trust */
   verificationLevel: 0 | 1 | 2 | 3 | 4
   verifiedBy: string

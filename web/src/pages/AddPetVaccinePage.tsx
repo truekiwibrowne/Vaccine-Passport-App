@@ -3,11 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getAllVaccineLibraryEntries } from '../services/vaccineLibraryService'
 import { addPetVaccine, getPets } from '../services/petsService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import { getPractitionersForVaccineType } from '../services/practitionersService'
 import type { VaccineLibraryEntry, AnimalVaccineType } from '../types/vaccineLibrary'
 import type { Pet, PetSpecies } from '../types/pet'
+import type { Clinic, Practitioner } from '../types/admin'
 import { PET_SPECIES_EMOJI, PET_SPECIES_LABELS } from '../types/pet'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 
 // Map pet species → AnimalVaccineType used in the unified library
 const SPECIES_TO_ANIMAL_TYPE: Partial<Record<PetSpecies, AnimalVaccineType>> = {
@@ -56,6 +61,8 @@ export function AddPetVaccinePage() {
 
   const [step, setStep] = useState<'search' | 'details'>('search')
   const [library, setLibrary] = useState<VaccineLibraryEntry[]>([])
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [searchQ, setSearchQ] = useState('')
   const [selected, setSelected] = useState<VaccineLibraryEntry | null>(null)
@@ -83,6 +90,8 @@ export function AddPetVaccinePage() {
             : 'Could not load the vaccine library. Check your connection and try again.',
         )
       })
+    getClinicsForVaccineType('veterinary').then(setClinics)
+    getPractitionersForVaccineType('veterinary').then(setPractitioners)
     if (user && petId) {
       getPets(user.uid).then(pets => {
         setPet(pets.find(p => p.id === petId) ?? null)
@@ -259,17 +268,24 @@ export function AddPetVaccinePage() {
               value={form.date_administration}
               onChange={e => update('date_administration', e.target.value)}
             />
-            <Input
-              label="Clinic / Vet"
+            <ClinicCombobox
               value={form.Clinic}
-              onChange={e => update('Clinic', e.target.value)}
-              placeholder="e.g. City Veterinary Clinic"
+              onChange={v => update('Clinic', v)}
+              clinics={clinics}
+              label="Veterinary Clinic"
+              placeholder="Search registered vet clinics or type a name…"
             />
-            <Input
-              label="Vet Name"
+            <PractitionerCombobox
               value={form.Doctor}
-              onChange={e => update('Doctor', e.target.value)}
-              placeholder="Dr. Jane Smith"
+              onChange={v => update('Doctor', v)}
+              onSelect={(name, clinicName) => {
+                update('Doctor', name)
+                if (!form.Clinic && clinicName) update('Clinic', clinicName)
+              }}
+              practitioners={practitioners}
+              label="Veterinarian"
+              placeholder="Search registered vets or type a name…"
+              preferClinic={form.Clinic}
             />
             <Input
               label="Expiry date (optional)"

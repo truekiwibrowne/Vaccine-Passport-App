@@ -3,10 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getAllVaccineLibraryEntries, searchLibrary } from '../services/vaccineLibraryService'
 import { addDependentVaccine, getDependents } from '../services/dependentsService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import { getPractitionersForVaccineType } from '../services/practitionersService'
 import type { VaccineLibraryEntry } from '../types/vaccineLibrary'
 import type { Dependent } from '../types/dependent'
+import type { Clinic, Practitioner } from '../types/admin'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 import { VACCINE_STATUS_COLOURS } from '../types/vaccineLibrary'
 
 export function AddDependentVaccinePage() {
@@ -16,6 +21,8 @@ export function AddDependentVaccinePage() {
 
   const [step, setStep] = useState<'search' | 'details'>('search')
   const [library, setLibrary] = useState<VaccineLibraryEntry[]>([])
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
   const [searchQ, setSearchQ] = useState('')
   const [selected, setSelected] = useState<VaccineLibraryEntry | null>(null)
   const [dependent, setDependent] = useState<Dependent | null>(null)
@@ -33,6 +40,8 @@ export function AddDependentVaccinePage() {
     getAllVaccineLibraryEntries().then(all => {
       setLibrary(all.filter(e => e.category === 'human_child'))
     })
+    getClinicsForVaccineType('human').then(setClinics)
+    getPractitionersForVaccineType('human').then(setPractitioners)
     if (user && depId) {
       getDependents(user.uid).then(deps => {
         setDependent(deps.find(d => d.id === depId) ?? null)
@@ -170,17 +179,21 @@ export function AddDependentVaccinePage() {
               value={form.date_administration}
               onChange={e => update('date_administration', e.target.value)}
             />
-            <Input
-              label="Clinic / Hospital"
+            <ClinicCombobox
               value={form.Clinic}
-              onChange={e => update('Clinic', e.target.value)}
-              placeholder="e.g. City Medical Centre"
+              onChange={v => update('Clinic', v)}
+              clinics={clinics}
             />
-            <Input
-              label="Doctor / Nurse"
+            <PractitionerCombobox
               value={form.Doctor}
-              onChange={e => update('Doctor', e.target.value)}
-              placeholder="Dr. Jane Smith"
+              onChange={v => update('Doctor', v)}
+              onSelect={(name, clinicName) => {
+                update('Doctor', name)
+                if (!form.Clinic && clinicName) update('Clinic', clinicName)
+              }}
+              practitioners={practitioners}
+              label="Doctor / Nurse"
+              preferClinic={form.Clinic}
             />
             <Input
               label="Expiry date (optional)"

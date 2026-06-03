@@ -11,6 +11,24 @@ export async function getClinics(): Promise<Clinic[]> {
   return snap.docs.map(d => ({ ...d.data(), id: d.id }) as Clinic)
 }
 
+/**
+ * Return only the clinics appropriate for a given vaccine context.
+ * 'human'     → human + both clinics  (for adult / dependent vaccines)
+ * 'veterinary'→ veterinary + both clinics  (for pet / farm vaccines)
+ * Legacy docs without clinicType default to 'human'.
+ */
+export async function getClinicsForVaccineType(
+  vaccineType: 'human' | 'veterinary',
+): Promise<Clinic[]> {
+  const all = await getClinics()
+  return all.filter(c => {
+    const ct = c.clinicType ?? 'human'
+    return vaccineType === 'human'
+      ? ct === 'human' || ct === 'both'
+      : ct === 'veterinary' || ct === 'both'
+  })
+}
+
 export async function addClinic(data: Omit<Clinic, 'id' | 'Created'>): Promise<string> {
   const ref = await addDoc(collection(db, 'Clinics'), { ...data, Created: isoNow() })
   return ref.id

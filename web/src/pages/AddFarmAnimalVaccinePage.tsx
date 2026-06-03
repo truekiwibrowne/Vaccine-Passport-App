@@ -3,11 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getAllVaccineLibraryEntries } from '../services/vaccineLibraryService'
 import { addFarmVaccine, getFarmAnimals } from '../services/farmService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import { getPractitionersForVaccineType } from '../services/practitionersService'
 import type { VaccineLibraryEntry, AnimalVaccineType } from '../types/vaccineLibrary'
 import type { FarmAnimal, FarmSpecies } from '../types/farm'
+import type { Clinic, Practitioner } from '../types/admin'
 import { FARM_SPECIES_EMOJI, FARM_SPECIES_LABELS } from '../types/farm'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 
 // Map farm species to the AnimalVaccineType used in the unified library
 const SPECIES_TO_ANIMAL_TYPE: Partial<Record<FarmSpecies, AnimalVaccineType>> = {
@@ -62,6 +67,8 @@ export function AddFarmAnimalVaccinePage() {
 
   const [step, setStep] = useState<'search' | 'details'>('search')
   const [library, setLibrary] = useState<VaccineLibraryEntry[]>([])
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [searchQ, setSearchQ] = useState('')
   const [selected, setSelected] = useState<VaccineLibraryEntry | null>(null)
@@ -90,6 +97,8 @@ export function AddFarmAnimalVaccinePage() {
             : 'Could not load the vaccine library. Check your connection and try again.',
         )
       })
+    getClinicsForVaccineType('veterinary').then(setClinics)
+    getPractitionersForVaccineType('veterinary').then(setPractitioners)
     if (user && animalId) {
       getFarmAnimals(user.uid).then(all => {
         setAnimal(all.find(a => a.id === animalId) ?? null)
@@ -262,17 +271,24 @@ export function AddFarmAnimalVaccinePage() {
               onChange={e => update('batch_number', e.target.value)}
               placeholder="e.g. BT20240915-3A"
             />
-            <Input
-              label="Clinic / Veterinary Practice"
+            <ClinicCombobox
               value={form.Clinic}
-              onChange={e => update('Clinic', e.target.value)}
-              placeholder="e.g. Farm & Country Vets"
+              onChange={v => update('Clinic', v)}
+              clinics={clinics}
+              label="Veterinary Practice"
+              placeholder="Search registered vet practices or type a name…"
             />
-            <Input
-              label="Veterinarian"
+            <PractitionerCombobox
               value={form.Doctor}
-              onChange={e => update('Doctor', e.target.value)}
-              placeholder="Dr. Jane Smith"
+              onChange={v => update('Doctor', v)}
+              onSelect={(name, clinicName) => {
+                update('Doctor', name)
+                if (!form.Clinic && clinicName) update('Clinic', clinicName)
+              }}
+              practitioners={practitioners}
+              label="Veterinarian"
+              placeholder="Search registered vets or type a name…"
+              preferClinic={form.Clinic}
             />
             <Input
               label="Expiry date (optional)"
