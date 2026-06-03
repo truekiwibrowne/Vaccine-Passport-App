@@ -1,11 +1,10 @@
 name: Vaccine News Crawler
 
-# ── Schedule ──────────────────────────────────────────────────────────────────
-# Runs every 6 hours.  Also triggerable manually from the Actions tab.
+# Runs every 6 hours. Also triggerable manually from the Actions tab.
 on:
   schedule:
     - cron: '0 */6 * * *'   # 00:00, 06:00, 12:00, 18:00 UTC
-  workflow_dispatch:         # Manual "Run workflow" button in GitHub Actions UI
+  workflow_dispatch:
 
 jobs:
   crawl:
@@ -14,11 +13,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # ── 1. Checkout repo ──────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Node.js setup ──────────────────────────────────────────────────
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -26,15 +23,16 @@ jobs:
           cache: 'npm'
           cache-dependency-path: crawler/package-lock.json
 
-      # ── 3. Install dependencies ───────────────────────────────────────────
       - name: Install crawler dependencies
         working-directory: crawler
         run: npm install
 
-      # ── 4. Run crawler ────────────────────────────────────────────────────
       - name: Run vaccine news crawler
         working-directory: crawler
         env:
-          ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+          # Required
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # Optional — add either key later to enable AI-powered summaries
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
         run: npx ts-node index.ts

@@ -2,13 +2,12 @@
   "name": "vaccine-news-crawler",
   "version": "1.0.0",
   "private": true,
-  "description": "Scheduled crawler — fetches vaccine news from WHO/CDC/Google, summarises with Claude, writes pending posts to Firestore.",
+  "description": "Scheduled crawler — fetches vaccine news from WHO/CDC/Google News and writes pending posts to Firestore.",
   "scripts": {
     "start": "ts-node index.ts",
     "crawl": "ts-node index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.27.0",
     "firebase-admin": "^12.0.0",
     "rss-parser": "^3.13.0"
   },

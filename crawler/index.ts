@@ -2,19 +2,18 @@
  * vaccine-news-crawler/index.ts
  *
  * Fetches vaccine news from WHO, CDC, and Google News RSS feeds,
- * uses Claude to summarise each article and suggest audience targeting,
- * then writes pending posts to the Firestore News_Feed collection.
+ * analyses each article with keyword matching, then writes pending
+ * posts to the Firestore News_Feed collection for admin review.
  *
  * Runs as a GitHub Actions scheduled job (every 6 hours).
- * Requires environment variables:
- *   ANTHROPIC_API_KEY       — from console.anthropic.com
+ * Required secret:
  *   FIREBASE_SERVICE_ACCOUNT — base64-encoded service account JSON
  *
- * For local testing, omit FIREBASE_SERVICE_ACCOUNT and place
- * serviceAccountKey.json in the repo root (one level up).
+ * Optional future upgrade — set either of these to enable AI summaries:
+ *   ANTHROPIC_API_KEY  — uses Claude (claude-haiku-4-5 for low cost)
+ *   GEMINI_API_KEY     — uses Google Gemini 1.5 Flash (free tier)
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import * as admin from 'firebase-admin'
 import Parser from 'rss-parser'
 import * as path from 'path'
@@ -27,12 +26,10 @@ function initFirebase(): admin.firestore.Firestore {
   let serviceAccount: admin.ServiceAccount
 
   if (envJson) {
-    // GitHub Actions: secret stored as base64-encoded JSON
     serviceAccount = JSON.parse(
       Buffer.from(envJson, 'base64').toString('utf8')
     ) as admin.ServiceAccount
   } else {
-    // Local dev: use serviceAccountKey.json in repo root
     const keyPath = path.resolve(__dirname, '../serviceAccountKey.json')
     if (!fs.existsSync(keyPath)) {
       throw new Error(
@@ -47,15 +44,8 @@ function initFirebase(): admin.firestore.Firestore {
   return admin.firestore()
 }
 
-const db   = initFirebase()
+const db = initFirebase()
 const NEWS_COL = 'News_Feed'
-
-// ── Anthropic init ─────────────────────────────────────────────────────────────
-
-if (!process.env.ANTHROPIC_API_KEY) {
-  throw new Error('ANTHROPIC_API_KEY environment variable is required.')
-}
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 // ── RSS feed definitions ───────────────────────────────────────────────────────
 
@@ -69,7 +59,6 @@ const FEEDS: FeedDef[] = [
   {
     name: 'WHO',
     url: 'https://www.who.int/feeds/entity/news/en/rss.xml',
-    // Only items that mention vaccines / immunisation
     filter: (item) => {
       const text = `${item.title ?? ''} ${item.contentSnippet ?? ''}`.toLowerCase()
       return (
@@ -83,7 +72,6 @@ const FEEDS: FeedDef[] = [
   },
   {
     name: 'CDC',
-    // CDC Vaccines & Immunizations news feed
     url: 'https://tools.cdc.gov/api/v2/resources/media/404952.rss',
     filter: () => true,
   },
@@ -94,7 +82,6 @@ const FEEDS: FeedDef[] = [
   },
 ]
 
-// Max articles processed per feed per crawl run (keeps Claude API costs low)
 const MAX_PER_FEED = 8
 
 // ── Deduplication ──────────────────────────────────────────────────────────────
@@ -109,57 +96,196 @@ async function getExistingSourceUrls(): Promise<Set<string>> {
   return urls
 }
 
-// ── Claude analysis ────────────────────────────────────────────────────────────
+// ── Keyword-based article analysis ────────────────────────────────────────────
+// No API key required. Derives badge, targeting, and a clean body from the
+// raw RSS title + snippet using simple keyword matching.
+//
+// To upgrade to AI summaries later, set ANTHROPIC_API_KEY or GEMINI_API_KEY
+// in GitHub Actions secrets — the aiAnalyse() function below will activate.
 
 interface ArticleAnalysis {
   title: string
   body: string
-  badge: 'Health Tip' | 'Travel Health' | 'Did you know?' | 'Recommended' | 'Vaccine Update' | 'Safety Alert'
-  countries: string[]        // ISO-3166-1 alpha-2 codes, or ["all"] for global
-  minAge: number | null      // e.g. 60 for senior content, 18 for adults only
-  maxAge: number | null      // e.g. 2 for infant/toddler, 17 for paediatric
-  gender: 'male' | 'female' | null  // only set when strictly gender-specific
+  badge: string
+  countries: string[]
+  minAge: number | null
+  maxAge: number | null
+  gender: 'male' | 'female' | null
 }
 
-async function analyseWithClaude(
+// Country name → ISO-3166-1 alpha-2 mapping (common vaccine-news countries)
+const COUNTRY_KEYWORDS: [string, string][] = [
+  ['united states', 'US'], ['usa', 'US'], ['u.s.', 'US'],
+  ['united kingdom', 'GB'], ['u.k.', 'GB'],
+  ['australia', 'AU'], ['new zealand', 'NZ'],
+  ['canada', 'CA'], ['india', 'IN'], ['china', 'CN'],
+  ['nigeria', 'NG'], ['kenya', 'KE'], ['south africa', 'ZA'],
+  ['ethiopia', 'ET'], ['ghana', 'GH'], ['tanzania', 'TZ'],
+  ['brazil', 'BR'], ['mexico', 'MX'], ['argentina', 'AR'],
+  ['germany', 'DE'], ['france', 'FR'], ['italy', 'IT'],
+  ['japan', 'JP'], ['south korea', 'KR'], ['indonesia', 'ID'],
+  ['pakistan', 'PK'], ['bangladesh', 'BD'], ['philippines', 'PH'],
+]
+
+function detectCountries(text: string): string[] {
+  const lower = text.toLowerCase()
+  const found: string[] = []
+  for (const [name, code] of COUNTRY_KEYWORDS) {
+    if (lower.includes(name) && !found.includes(code)) found.push(code)
+  }
+  return found
+}
+
+function detectBadge(text: string): string {
+  const t = text.toLowerCase()
+  if (t.includes('travel') || t.includes('border') || t.includes('tourism') || t.includes('abroad')) return 'Travel Health'
+  if (t.includes('alert') || t.includes('outbreak') || t.includes('emergency') || t.includes('warning')) return 'Safety Alert'
+  if (t.includes('recommend') || t.includes('schedule') || t.includes('routine')) return 'Recommended'
+  if (t.includes('update') || t.includes('approved') || t.includes('new vaccine') || t.includes('authoriz')) return 'Vaccine Update'
+  if (t.includes('did you know') || t.includes('fact') || t.includes('myth') || t.includes('research')) return 'Did you know?'
+  return 'Health Tip'
+}
+
+function detectAgeRange(text: string): { minAge: number | null; maxAge: number | null } {
+  const t = text.toLowerCase()
+  if (t.includes('infant') || t.includes('newborn') || t.includes('neonate') || t.includes('0-2') || t.includes('0 to 2')) {
+    return { minAge: null, maxAge: 2 }
+  }
+  if (t.includes('child') || t.includes('paediatric') || t.includes('pediatric') || t.includes('school-age')) {
+    return { minAge: null, maxAge: 17 }
+  }
+  if (t.includes('elderly') || t.includes('older adult') || t.includes('aged 65') || t.includes('65 and older') || t.includes('65+')) {
+    return { minAge: 65, maxAge: null }
+  }
+  if (t.includes('senior') || t.includes('aged 60') || t.includes('60 and older') || t.includes('60+')) {
+    return { minAge: 60, maxAge: null }
+  }
+  if (t.includes('adolescent') || t.includes('teen') || t.includes('12-18') || t.includes('12 to 18')) {
+    return { minAge: 12, maxAge: 18 }
+  }
+  return { minAge: null, maxAge: null }
+}
+
+function detectGender(text: string): 'male' | 'female' | null {
+  const t = text.toLowerCase()
+  if (t.includes('cervical') || t.includes('ovarian') || t.includes('maternal') || t.includes('pregnancy') || t.includes('pregnant')) return 'female'
+  if (t.includes('prostate')) return 'male'
+  // HPV vaccines are recommended for all genders — don't filter
+  return null
+}
+
+function cleanSnippet(raw: string): string {
+  // Strip HTML tags, decode common entities, collapse whitespace
+  return raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 400)
+}
+
+function keywordAnalyse(
+  rawTitle: string,
+  rawSnippet: string,
+): ArticleAnalysis {
+  const title = rawTitle.trim().slice(0, 120)
+  const body  = cleanSnippet(rawSnippet) || title
+  const combined = `${title} ${body}`
+
+  return {
+    title,
+    body,
+    badge:    detectBadge(combined),
+    countries: detectCountries(combined),
+    ...detectAgeRange(combined),
+    gender:   detectGender(combined),
+  }
+}
+
+// ── Optional AI upgrade (activates when API key is present) ───────────────────
+// Plug in ANTHROPIC_API_KEY or GEMINI_API_KEY in GitHub Actions secrets to
+// enable richer summaries without changing any code.
+
+async function aiAnalyse(
   rawTitle: string,
   rawSnippet: string,
   sourceName: string,
 ): Promise<ArticleAnalysis | null> {
-  const prompt = `You are a health news editor for a global vaccine passport app whose users include travellers, parents, seniors, and healthcare workers.
+  // ── Claude (Anthropic) ──────────────────────────────────────────────────────
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Anthropic = require('@anthropic-ai/sdk').default
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+      const prompt = buildAiPrompt(rawTitle, rawSnippet, sourceName)
+      const res = await client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const text: string = res.content[0]?.type === 'text' ? res.content[0].text.trim() : ''
+      return JSON.parse(text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')) as ArticleAnalysis
+    } catch (e) {
+      console.warn('  Claude unavailable, falling back to keyword analysis:', (e as Error).message)
+    }
+  }
+
+  // ── Gemini (Google — free tier) ─────────────────────────────────────────────
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: buildAiPrompt(rawTitle, rawSnippet, sourceName) }] }],
+            generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
+          }),
+        }
+      )
+      const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? ''
+      return JSON.parse(text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')) as ArticleAnalysis
+    } catch (e) {
+      console.warn('  Gemini unavailable, falling back to keyword analysis:', (e as Error).message)
+    }
+  }
+
+  return null
+}
+
+function buildAiPrompt(rawTitle: string, rawSnippet: string, sourceName: string): string {
+  return `You are a health news editor for a global vaccine passport app.
 
 Article from ${sourceName}:
 Title: ${rawTitle}
-Excerpt: ${rawSnippet.slice(0, 900)}
+Excerpt: ${rawSnippet.slice(0, 800)}
 
-Return ONLY a JSON object (no markdown, no code fences, no explanation) with exactly these fields:
+Return ONLY a JSON object (no markdown, no code fences) with exactly these fields:
 {
-  "title": "Concise, engaging headline under 80 characters — no clickbait",
-  "body": "2-3 plain-language sentences summarising the news for a general audience",
-  "badge": "Exactly one of: Health Tip | Travel Health | Did you know? | Recommended | Vaccine Update | Safety Alert",
-  "countries": ["ISO-3166-1 alpha-2 codes for countries mentioned (e.g. KE, AU, GB, US) — use [\"all\"] if the news applies globally"],
-  "minAge": null or integer (e.g. 60 for senior-specific, 18 for adult-only, 65 for elderly),
-  "maxAge": null or integer (e.g. 2 for infant/toddler, 17 for paediatric / under-18),
-  "gender": null or "female" or "male" (ONLY set this if the vaccine/news is strictly gender-specific, e.g. HPV, cervical cancer, prostate)
+  "title": "Concise headline under 80 characters",
+  "body": "2-3 plain-language sentences for a general audience",
+  "badge": "One of: Health Tip | Travel Health | Did you know? | Recommended | Vaccine Update | Safety Alert",
+  "countries": ["ISO-3166-1 alpha-2 codes if geographically specific, e.g. AU,KE — or use all for global"],
+  "minAge": null or integer (e.g. 60 for senior, 18 for adult-only),
+  "maxAge": null or integer (e.g. 2 for infant, 17 for paediatric),
+  "gender": null or "female" or "male" (only if strictly gender-specific)
 }`
+}
 
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 600,
-      messages: [{ role: 'user', content: prompt }],
-    })
-
-    const text =
-      response.content[0].type === 'text' ? response.content[0].text.trim() : ''
-
-    // Strip any accidental markdown code fences
-    const cleaned = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
-    return JSON.parse(cleaned) as ArticleAnalysis
-  } catch (e) {
-    console.error(`    Claude error: ${e instanceof Error ? e.message : String(e)}`)
-    return null
-  }
+async function analyseArticle(
+  rawTitle: string,
+  rawSnippet: string,
+  sourceName: string,
+): Promise<ArticleAnalysis> {
+  // Try AI first (only activates if an API key is set), fall back to keywords
+  const ai = await aiAnalyse(rawTitle, rawSnippet, sourceName)
+  return ai ?? keywordAnalyse(rawTitle, rawSnippet)
 }
 
 // ── Build Firestore targets array ──────────────────────────────────────────────
@@ -167,10 +293,7 @@ Return ONLY a JSON object (no markdown, no code fences, no explanation) with exa
 function buildTargets(analysis: ArticleAnalysis): object[] {
   const targets: object[] = []
 
-  const isGlobal =
-    analysis.countries.includes('all') ||
-    analysis.countries.length === 0
-
+  const isGlobal = analysis.countries.length === 0 || analysis.countries.includes('all')
   if (isGlobal) {
     targets.push({ type: 'all' })
   } else {
@@ -194,9 +317,15 @@ function buildTargets(analysis: ArticleAnalysis): object[] {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const runStart = new Date().toISOString()
+  const aiMode = process.env.ANTHROPIC_API_KEY
+    ? 'Claude'
+    : process.env.GEMINI_API_KEY
+      ? 'Gemini'
+      : 'keyword matching (free)'
+
   console.log(`\n${'═'.repeat(60)}`)
-  console.log(` Vaccine News Crawler — ${runStart}`)
+  console.log(` Vaccine News Crawler — ${new Date().toISOString()}`)
+  console.log(` Analysis mode: ${aiMode}`)
   console.log(`${'═'.repeat(60)}\n`)
 
   const parser = new Parser()
@@ -207,43 +336,33 @@ async function main(): Promise<void> {
   let totalSkipped = 0
 
   for (const feed of FEEDS) {
-    console.log(`▶ Fetching ${feed.name} (${feed.url})…`)
+    console.log(`▶ Fetching ${feed.name}…`)
 
     let feedResult: Parser.Output<Parser.Item>
     try {
       feedResult = await parser.parseURL(feed.url)
     } catch (e) {
-      console.error(`  ✗ Failed to fetch feed: ${e instanceof Error ? e.message : String(e)}\n`)
+      console.error(`  ✗ Failed: ${(e as Error).message}\n`)
       continue
     }
 
     const relevant = (feedResult.items ?? []).filter(feed.filter)
-    console.log(`  ${relevant.length} relevant items found`)
+    console.log(`  ${relevant.length} relevant items`)
 
     let feedAdded = 0
 
     for (const item of relevant.slice(0, MAX_PER_FEED)) {
       const url = item.link ?? item.guid ?? ''
-      if (!url) { totalSkipped++; continue }
+      if (!url || existingUrls.has(url)) { totalSkipped++; continue }
 
-      if (existingUrls.has(url)) {
-        totalSkipped++
-        continue
-      }
-
-      const rawTitle   = (item.title   ?? 'Vaccine News').trim()
+      const rawTitle   = (item.title ?? 'Vaccine News').trim()
       const rawSnippet = (item.contentSnippet ?? item.summary ?? '').trim()
 
-      console.log(`  → ${rawTitle.slice(0, 70)}…`)
+      console.log(`  → ${rawTitle.slice(0, 65)}…`)
 
-      const analysis = await analyseWithClaude(rawTitle, rawSnippet, feed.name)
-      if (!analysis) {
-        console.log('    ✗ Skipped (Claude returned no result)')
-        totalSkipped++
-        continue
-      }
+      const analysis = await analyseArticle(rawTitle, rawSnippet, feed.name)
 
-      const now = new Date().toISOString()
+      const now     = new Date().toISOString()
       const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : now
 
       await db.collection(NEWS_COL).add({
@@ -266,14 +385,14 @@ async function main(): Promise<void> {
       existingUrls.add(url)
       feedAdded++
       totalAdded++
-      console.log(`    ✓ Queued: "${analysis.title}"`)
+      console.log(`    ✓ Queued: "${analysis.title.slice(0, 60)}"`)
     }
 
-    console.log(`  ${feedAdded} new items queued from ${feed.name}\n`)
+    console.log(`  ${feedAdded} new items queued\n`)
   }
 
   console.log(`${'═'.repeat(60)}`)
-  console.log(` Run complete  |  +${totalAdded} queued  |  ${totalSkipped} skipped`)
+  console.log(` Done  |  +${totalAdded} queued  |  ${totalSkipped} skipped`)
   console.log(`${'═'.repeat(60)}\n`)
 }
 
