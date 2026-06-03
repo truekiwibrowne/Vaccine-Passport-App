@@ -324,7 +324,10 @@ export function HomePage() {
 
   function toggleEditMode() { setEditMode(v => !v) }
 
-  const visibleNews = newsPost && matchesTargets(newsPost.targets, profile ?? {}, vaccines) ? newsPost : null
+  // Always show the most recent active news post on the home tile.
+  // Targeting (location / age / gender) is advisory — used for push notifications
+  // and the library feed — not a gate for the home screen tile.
+  const visibleNews = newsPost ?? null
   const visibleSponsored = sponsored && matchesTargets(sponsored.targets, profile ?? {}, vaccines) ? sponsored : null
 
   const totalCount    = vaccines.length
@@ -399,13 +402,39 @@ export function HomePage() {
           >
             {visibleNews ? (
               <>
+                {/* Hero image — bleeds to tile edges */}
                 {visibleNews.imageUrl && (
-                  <img src={visibleNews.imageUrl} alt="" className="w-full h-36 object-cover rounded-xl mb-3 -mt-1" />
+                  <div className="-mx-4 -mt-3 mb-3">
+                    <img
+                      src={visibleNews.imageUrl}
+                      alt={visibleNews.title}
+                      className="w-full h-44 object-cover"
+                      onError={e => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }}
+                    />
+                  </div>
                 )}
-                <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">{visibleNews.title}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed line-clamp-3">{visibleNews.body}</p>
-                {visibleNews.actionLabel && visibleNews.actionUrl && (
-                  <p className={`text-xs font-semibold mt-2 ${isFarmMode ? 'text-green-700 dark:text-green-400' : 'text-rose-500'}`}>{visibleNews.actionLabel} →</p>
+                {/* Badge pill */}
+                {visibleNews.badge && (
+                  <span className={`inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full mb-2 ${
+                    isFarmMode
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
+                      : 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400'
+                  }`}>{visibleNews.badge}</span>
+                )}
+                {/* Title */}
+                <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2">{visibleNews.title}</p>
+                {/* Snippet */}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed line-clamp-2">{visibleNews.body}</p>
+                {/* Read more link */}
+                {visibleNews.actionUrl && (
+                  <p className={`text-xs font-semibold mt-3 flex items-center gap-0.5 ${
+                    isFarmMode ? 'text-green-700 dark:text-green-400' : 'text-rose-500'
+                  }`}>
+                    {visibleNews.actionLabel ?? 'Read more'}
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </p>
                 )}
               </>
             ) : (

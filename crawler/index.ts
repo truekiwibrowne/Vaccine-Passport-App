@@ -19,6 +19,86 @@ import Parser from 'rss-parser'
 import * as path from 'path'
 import * as fs from 'fs'
 
+// ── Open Graph image fetcher ───────────────────────────────────────────────────
+// Tries RSS-embedded media first (no extra HTTP request), then falls back to
+// fetching the article page and extracting og:image / twitter:image.
+
+type RssItemWithMedia = Parser.Item & {
+  enclosure?: { url?: string; type?: string }
+  'media:content'?: { $?: { url?: string } } | Array<{ $?: { url?: string } }>
+  'media:thumbnail'?: { $?: { url?: string } }
+}
+
+function rssEmbeddedImage(item: RssItemWithMedia): string | null {
+  // enclosure (standard RSS 2.0)
+  if (item.enclosure?.url && /^https?:/.test(item.enclosure.url)) {
+    return item.enclosure.url
+  }
+  // media:content (Media RSS)
+  const mc = item['media:content']
+  if (mc) {
+    const first = Array.isArray(mc) ? mc[0] : mc
+    const url = first?.$?.url
+    if (url && /^https?:/.test(url)) return url
+  }
+  // media:thumbnail
+  const mt = item['media:thumbnail']
+  if (mt?.$?.url && /^https?:/.test(mt.$!.url!)) return mt.$!.url!
+  return null
+}
+
+async function fetchOgImage(articleUrl: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 6000)
+    const res = await fetch(articleUrl, {
+      signal: controller.signal as RequestInit['signal'],
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; VaccinePassportBot/1.0)',
+        'Accept': 'text/html',
+      },
+      redirect: 'follow',
+    })
+    clearTimeout(timer)
+    if (!res.ok) return null
+
+    // Only read the first 30 KB — the <head> is always near the top
+    const reader = res.body?.getReader()
+    if (!reader) return null
+    let html = ''
+    let bytes = 0
+    while (bytes < 30_000) {
+      const { done, value } = await reader.read()
+      if (done) break
+      html += Buffer.from(value).toString('utf8')
+      bytes += value.length
+    }
+    reader.cancel().catch(() => {})
+
+    // og:image (two attribute orderings)
+    const ogMatch =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+    if (ogMatch?.[1] && /^https?:/.test(ogMatch[1])) return ogMatch[1]
+
+    // twitter:image fallback
+    const twMatch =
+      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i) ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i)
+    if (twMatch?.[1] && /^https?:/.test(twMatch[1])) return twMatch[1]
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function resolveImage(item: RssItemWithMedia, articleUrl: string): Promise<string | null> {
+  const embedded = rssEmbeddedImage(item)
+  if (embedded) return embedded
+  return fetchOgImage(articleUrl)
+}
+
 // ── Firebase init ──────────────────────────────────────────────────────────────
 
 function initFirebase(): admin.firestore.Firestore {
@@ -328,7 +408,16 @@ async function main(): Promise<void> {
   console.log(` Analysis mode: ${aiMode}`)
   console.log(`${'═'.repeat(60)}\n`)
 
-  const parser = new Parser()
+  // Configure parser to pull media:content and media:thumbnail from RSS
+  const parser = new Parser({
+    customFields: {
+      item: [
+        ['media:content',   'media:content',   { keepArray: false }],
+        ['media:thumbnail', 'media:thumbnail', { keepArray: false }],
+      ],
+    },
+  })
+
   const existingUrls = await getExistingSourceUrls()
   console.log(`Loaded ${existingUrls.size} already-indexed article URLs\n`)
 
@@ -360,12 +449,17 @@ async function main(): Promise<void> {
 
       console.log(`  → ${rawTitle.slice(0, 65)}…`)
 
-      const analysis = await analyseArticle(rawTitle, rawSnippet, feed.name)
+      // Run analysis and image fetch in parallel
+      const [analysis, imageUrl] = await Promise.all([
+        analyseArticle(rawTitle, rawSnippet, feed.name),
+        resolveImage(item as RssItemWithMedia, url),
+      ])
+      if (imageUrl) console.log(`    🖼  Image: ${imageUrl.slice(0, 80)}`)
 
       const now     = new Date().toISOString()
       const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : now
 
-      await db.collection(NEWS_COL).add({
+      const doc: Record<string, unknown> = {
         title:       analysis.title,
         body:        analysis.body,
         badge:       analysis.badge,
@@ -380,7 +474,10 @@ async function main(): Promise<void> {
         createdBy:   'crawler',
         createdAt:   now,
         updatedAt:   now,
-      })
+      }
+      if (imageUrl) doc.imageUrl = imageUrl
+
+      await db.collection(NEWS_COL).add(doc)
 
       existingUrls.add(url)
       feedAdded++

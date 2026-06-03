@@ -339,6 +339,12 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    // Written only by the Netlify expiry-reminders backend function (Admin SDK bypasses rules).
+    // Clients never need to read or write this collection.
+    match /Expiry_Reminder_Log/{logId} {
+      allow read, write: if false;
+    }
+
 
     // ──────────────────── News feed & sponsored content ────────────────────
 

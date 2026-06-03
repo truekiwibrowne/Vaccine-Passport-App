@@ -18,6 +18,10 @@ export interface NewsFeedPost {
   sourceUrl?: string      // Original article URL — used for deduplication
   crawledAt?: string      // ISO timestamp when crawler added this item
   badge?: string          // Suggested badge label from Claude
+  // Push notification tracking
+  pushSent?: boolean      // false = queued for push; true = already sent; missing = not yet queued
+  pushSentAt?: string
+  pushSentCount?: number
 }
 
 export type SponsoredBadge =

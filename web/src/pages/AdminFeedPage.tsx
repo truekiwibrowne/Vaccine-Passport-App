@@ -142,7 +142,16 @@ function NewsSection({ isLg }: { isLg: boolean }) {
     if (!user || !form.title || !form.body) return
     setSaving(true)
     try {
-      const payload = clean({ ...form, publishedAt: new Date(form.publishedAt).toISOString(), imageUrl: form.imageUrl || undefined, actionUrl: form.actionUrl || undefined, actionLabel: form.actionLabel || undefined, createdBy: user.uid })
+      const payload = clean({
+        ...form,
+        publishedAt: new Date(form.publishedAt).toISOString(),
+        imageUrl: form.imageUrl || undefined,
+        actionUrl: form.actionUrl || undefined,
+        actionLabel: form.actionLabel || undefined,
+        createdBy: user.uid,
+        // Only queue push on first activation; skip re-sends on edits
+        ...(form.status === 'active' && !selectedId ? { pushSent: false } : {}),
+      })
       if (selectedId) await updateNewsPost(selectedId, payload)
       else await createNewsPost(payload)
       closeDetail(); await load()
@@ -450,6 +459,8 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
         imageUrl: approveForm.imageUrl || undefined,
         actionUrl: approveForm.actionUrl || undefined,
         actionLabel: approveForm.actionLabel || undefined,
+        // Flag for process-notifications: send push to targeted users
+        pushSent: false,
       }))
       setApprovingId(null)
       setApproveForm(null)
@@ -479,36 +490,43 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
       ) : items.map(p => (
         <div key={p.id}
           onClick={() => openApprove(p)}
-          className={`bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border cursor-pointer transition-all active:scale-[0.98] ${
+          className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border cursor-pointer transition-all active:scale-[0.98] overflow-hidden ${
             approvingId === p.id ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-400' : 'border-gray-100 dark:border-gray-700 hover:border-gray-200'
           }`}
         >
-          <div className="flex items-start gap-2 mb-2">
-            {p.source && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${SOURCE_COLOURS[p.source] ?? 'bg-gray-100 text-gray-600'}`}>
-                {p.source}
-              </span>
-            )}
-            {p.badge && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex-shrink-0">
-                {p.badge}
-              </span>
-            )}
-          </div>
-          <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">{p.title}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{p.body}</p>
-          <div className="flex items-center gap-2 mt-3">
-            <p className="flex-1 text-xs text-gray-300 dark:text-gray-600">
-              {p.crawledAt ? `Crawled ${fmtDate(p.crawledAt)}` : fmtDate(p.publishedAt)}
-            </p>
-            <button
-              onClick={e => { e.stopPropagation(); handleReject(p.id) }}
-              className="text-xs font-medium text-red-500 hover:text-red-700"
-            >Reject</button>
-            <button
-              onClick={e => { e.stopPropagation(); openApprove(p) }}
-              className="text-xs font-semibold text-green-600 hover:text-green-800"
-            >Review →</button>
+          {/* Thumbnail strip when image available */}
+          {p.imageUrl && (
+            <img src={p.imageUrl} alt="" className="w-full h-32 object-cover"
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+          )}
+          <div className="p-4">
+            <div className="flex items-start gap-2 mb-2">
+              {p.source && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${SOURCE_COLOURS[p.source] ?? 'bg-gray-100 text-gray-600'}`}>
+                  {p.source}
+                </span>
+              )}
+              {p.badge && (
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex-shrink-0">
+                  {p.badge}
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">{p.title}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{p.body}</p>
+            <div className="flex items-center gap-2 mt-3">
+              <p className="flex-1 text-xs text-gray-300 dark:text-gray-600">
+                {p.crawledAt ? `Crawled ${fmtDate(p.crawledAt)}` : fmtDate(p.publishedAt)}
+              </p>
+              <button
+                onClick={e => { e.stopPropagation(); handleReject(p.id) }}
+                className="text-xs font-medium text-red-500 hover:text-red-700"
+              >Reject</button>
+              <button
+                onClick={e => { e.stopPropagation(); openApprove(p) }}
+                className="text-xs font-semibold text-green-600 hover:text-green-800"
+              >Review →</button>
+            </div>
           </div>
         </div>
       ))}
@@ -534,6 +552,18 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
         </a>
       )}
       <div className="flex flex-col gap-3">
+        {/* Image preview */}
+        {approveForm.imageUrl && (
+          <div className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+            <img src={approveForm.imageUrl} alt=""
+              className="w-full h-48 object-cover"
+              onError={e => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }} />
+          </div>
+        )}
+        <div>
+          <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">Image URL</label>
+          <input value={approveForm.imageUrl} onChange={e => setApproveForm(f => f ? { ...f, imageUrl: e.target.value } : f)} placeholder="https://… (auto-fetched from article)" className={inputCls} />
+        </div>
         <div>
           <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide block mb-1">Title</label>
           <input value={approveForm.title} onChange={e => setApproveForm(f => f ? { ...f, title: e.target.value } : f)} className={inputCls} />

@@ -61,7 +61,7 @@ export function AdminPage() {
   ]
 
   return (
-    <div className="h-screen overflow-hidden bg-gray-50 dark:bg-gray-900 flex flex-col">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-gray-50 dark:bg-gray-900 flex flex-col">
       {/* Sticky header */}
       <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
         <div className="flex items-center h-14 px-4">
@@ -96,7 +96,7 @@ export function AdminPage() {
       </div>
 
       {/* Tab content — full-width so split panes use the whole screen */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-y-auto lg:overflow-hidden">
         {tab === 'clinics' && <AdminClinicsPage />}
         {tab === 'practitioners' && <AdminPractitionersPage />}
         {tab === 'library' && <AdminLibraryPage />}
