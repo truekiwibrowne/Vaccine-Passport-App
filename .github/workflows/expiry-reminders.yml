@@ -1,0 +1,31 @@
+name: Expiry Reminders
+
+on:
+  schedule:
+    - cron: '0 8 * * *'     # Daily at 08:00 UTC
+  workflow_dispatch:          # Manual trigger from Actions tab
+
+jobs:
+  remind:
+    name: Send Vaccine Expiry Reminders
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install notifier dependencies
+        working-directory: notifier
+        run: npm install
+
+      - name: Run expiry reminder notifier
+        working-directory: notifier
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node expiry-reminders.js

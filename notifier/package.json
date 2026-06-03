@@ -1,0 +1,14 @@
+{
+  "name": "vaccine-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scheduled notification jobs — custom alerts, news pushes, and vaccine expiry reminders.",
+  "type": "module",
+  "scripts": {
+    "notifications": "node process-notifications.js",
+    "expiry":        "node expiry-reminders.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

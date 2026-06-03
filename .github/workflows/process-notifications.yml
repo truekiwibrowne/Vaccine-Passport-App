@@ -1,0 +1,31 @@
+name: Process Notifications
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # Every 30 minutes
+  workflow_dispatch:           # Manual trigger from Actions tab
+
+jobs:
+  notify:
+    name: Send Scheduled & News Notifications
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install notifier dependencies
+        working-directory: notifier
+        run: npm install
+
+      - name: Run notification processor
+        working-directory: notifier
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node process-notifications.js
