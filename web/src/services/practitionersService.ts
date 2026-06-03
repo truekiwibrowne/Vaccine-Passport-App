@@ -5,6 +5,7 @@ import {
 import { db } from '../firebase'
 import type { Practitioner } from '../types/admin'
 import { isoNow } from '../utils/dateUtils'
+import type { PractitionerImportData } from '../utils/practitionersCsv'
 
 export async function getPractitioners(): Promise<Practitioner[]> {
   const snap = await getDocs(query(collection(db, 'Practitioners'), orderBy('name')))
@@ -65,6 +66,21 @@ export async function selfRegisterPractitioner(
     active: true,
     Created: isoNow(),
   })
+}
+
+/**
+ * Bulk upsert: rows with an id are merged; rows without are added as new docs.
+ * Does NOT overwrite verifiedBy/verifiedAt — those are preserved from existing docs.
+ */
+export async function bulkUpsertPractitioners(rows: PractitionerImportData[]): Promise<void> {
+  await Promise.all(rows.map(row => {
+    const { id, ...data } = row
+    const payload = { ...data, email: (data.email ?? '').toLowerCase() }
+    if (id) {
+      return setDoc(doc(db, 'Practitioners', id), payload, { merge: true })
+    }
+    return addDoc(collection(db, 'Practitioners'), { ...payload, verifiedBy: '', verifiedAt: '', Created: isoNow() })
+  }))
 }
 
 /**
