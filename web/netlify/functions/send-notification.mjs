@@ -10,14 +10,20 @@ import { initializeApp, cert, getApps } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { getMessaging } from 'firebase-admin/messaging'
 
+function getServiceAccount() {
+  // Prefer base64-encoded var (same as crawler) — immune to newline escaping issues
+  const b64  = process.env.FIREBASE_SERVICE_ACCOUNT
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  if (!b64 && !json) throw new Error('Set FIREBASE_SERVICE_ACCOUNT (base64) or FIREBASE_SERVICE_ACCOUNT_JSON in Netlify env vars')
+  if (b64) return JSON.parse(Buffer.from(b64, 'base64').toString('utf8'))
+  const sa = JSON.parse(json)
+  if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
+  return sa
+}
+
 function initAdmin() {
-  const { FIREBASE_SERVICE_ACCOUNT_JSON } = process.env
-  if (!FIREBASE_SERVICE_ACCOUNT_JSON) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON not set')
   if (!getApps().length) {
-    const sa = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)
-    // Netlify env vars sometimes store \n as literal backslash-n — fix the PEM key
-    if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
-    initializeApp({ credential: cert(sa) })
+    initializeApp({ credential: cert(getServiceAccount()) })
   }
 }
 

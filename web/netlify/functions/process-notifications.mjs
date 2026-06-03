@@ -17,19 +17,29 @@ export const config = {
   schedule: '*/5 * * * *',
 }
 
-export default async function handler() {
-  const { FIREBASE_SERVICE_ACCOUNT_JSON } = process.env
+function getServiceAccount() {
+  // Prefer base64-encoded var — immune to newline escaping issues
+  const b64  = process.env.FIREBASE_SERVICE_ACCOUNT
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  if (!b64 && !json) throw new Error('Set FIREBASE_SERVICE_ACCOUNT (base64) or FIREBASE_SERVICE_ACCOUNT_JSON in Netlify env vars')
+  if (b64) return JSON.parse(Buffer.from(b64, 'base64').toString('utf8'))
+  const sa = JSON.parse(json)
+  if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
+  return sa
+}
 
-  if (!FIREBASE_SERVICE_ACCOUNT_JSON) {
-    console.error('FIREBASE_SERVICE_ACCOUNT_JSON not set')
-    return new Response(JSON.stringify({ error: 'Not configured' }), { status: 503 })
-  }
-
-  // Initialize Firebase Admin (avoid re-init on warm invocations)
+function initAdmin() {
   if (!getApps().length) {
-    const sa = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)
-    if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
-    initializeApp({ credential: cert(sa) })
+    initializeApp({ credential: cert(getServiceAccount()) })
+  }
+}
+
+export default async function handler() {
+  try {
+    initAdmin()
+  } catch (e) {
+    console.error('Firebase init error:', e.message)
+    return new Response(JSON.stringify({ error: e.message }), { status: 503 })
   }
 
   const db = getFirestore()
