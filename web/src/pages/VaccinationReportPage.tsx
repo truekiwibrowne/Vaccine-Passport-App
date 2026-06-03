@@ -468,7 +468,7 @@ export function VaccinationReportPage() {
   const { isDark }       = useTheme()
   const isFarmMode       = profile?.appMode === 'farm'
 
-  const ownerName = profile?.Username ?? profile?.displayName ?? user?.email ?? 'User'
+  const ownerName = profile?.Full_Name ?? profile?.Username ?? user?.email ?? 'User'
 
   return (
     <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 pb-28 ${isDark ? 'dark' : ''}`}>

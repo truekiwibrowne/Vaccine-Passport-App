@@ -134,7 +134,7 @@ function NewsSection({ isLg }: { isLg: boolean }) {
   function openNew() { setIsNew(true); setSelectedId(null); setForm(blankNewsForm()) }
   function openEdit(p: NewsFeedPost) {
     setIsNew(false); setSelectedId(p.id)
-    setForm({ title: p.title, body: p.body, imageUrl: p.imageUrl ?? '', actionUrl: p.actionUrl ?? '', actionLabel: p.actionLabel ?? 'Read more', targets: p.targets, status: p.status, publishedAt: p.publishedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10) })
+    setForm({ title: p.title, body: p.body, imageUrl: p.imageUrl ?? '', actionUrl: p.actionUrl ?? '', actionLabel: p.actionLabel ?? 'Read more', targets: p.targets, status: p.status === 'pending' ? 'active' : p.status, publishedAt: p.publishedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10) })
   }
   function closeDetail() { setSelectedId(null); setIsNew(false) }
 

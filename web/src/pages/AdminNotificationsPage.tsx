@@ -251,7 +251,16 @@ export function AdminNotificationsPage() {
       }
       closeDetail()
       await load()
-    } catch (e) { console.error('Save error:', e); alert('Error saving notification.') }
+    } catch (e) {
+      console.error('Save error:', e)
+      const code = (e as { code?: string })?.code
+      const msg  = (e as Error)?.message ?? String(e)
+      alert(
+        code === 'permission-denied'
+          ? 'Permission denied.\n\nYou need a document in the Firestore Admins collection.\n\nGo to Firebase Console → Firestore → Admins collection → Add document with your UID as the ID.'
+          : `Error saving notification: ${msg}`
+      )
+    }
     finally { setSaving(false) }
   }
 

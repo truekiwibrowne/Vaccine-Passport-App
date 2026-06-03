@@ -14,7 +14,10 @@ function initAdmin() {
   const { FIREBASE_SERVICE_ACCOUNT_JSON } = process.env
   if (!FIREBASE_SERVICE_ACCOUNT_JSON) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON not set')
   if (!getApps().length) {
-    initializeApp({ credential: cert(JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)) })
+    const sa = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)
+    // Netlify env vars sometimes store \n as literal backslash-n — fix the PEM key
+    if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
+    initializeApp({ credential: cert(sa) })
   }
 }
 

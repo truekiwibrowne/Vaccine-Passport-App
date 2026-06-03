@@ -27,7 +27,9 @@ export default async function handler() {
 
   // Initialize Firebase Admin (avoid re-init on warm invocations)
   if (!getApps().length) {
-    initializeApp({ credential: cert(JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)) })
+    const sa = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)
+    if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n')
+    initializeApp({ credential: cert(sa) })
   }
 
   const db = getFirestore()

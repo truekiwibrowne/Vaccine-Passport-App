@@ -7,6 +7,13 @@ import type { ScheduledNotification } from '../types/admin'
 
 const COL = 'Scheduled_Notifications'
 
+/** Strip keys whose value is undefined — Firestore rejects undefined field values */
+function stripUndefined<T extends object>(obj: T): T {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined)
+  ) as T
+}
+
 export async function getScheduledNotifications(): Promise<ScheduledNotification[]> {
   const snap = await getDocs(query(collection(db, COL), orderBy('scheduledAt', 'desc')))
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as ScheduledNotification))
@@ -15,11 +22,11 @@ export async function getScheduledNotifications(): Promise<ScheduledNotification
 export async function createScheduledNotification(
   data: Omit<ScheduledNotification, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
-  const ref = await addDoc(collection(db, COL), {
+  const ref = await addDoc(collection(db, COL), stripUndefined({
     ...data,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-  })
+  }))
   return ref.id
 }
 
@@ -27,7 +34,7 @@ export async function updateScheduledNotification(
   id: string,
   data: Partial<Omit<ScheduledNotification, 'id'>>
 ): Promise<void> {
-  await updateDoc(doc(db, COL, id), { ...data, updatedAt: new Date().toISOString() })
+  await updateDoc(doc(db, COL, id), stripUndefined({ ...data, updatedAt: new Date().toISOString() }))
 }
 
 export async function deleteScheduledNotification(id: string): Promise<void> {
