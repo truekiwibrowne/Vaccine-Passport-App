@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+
+  /*
+    Tell the browser which colour scheme is active so that native UI elements
+    (scrollbars, form controls, iOS keyboard tint, address bar) follow our
+    class-based toggle rather than the system preference.
+  */
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #f9fafb;
+    color: #111827;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .dark body {
+    background-color: #000;
+    color: #f9fafb;
+  }
+}
+
+/*
+  iOS Safari zooms the viewport whenever a focused input has font-size < 16px.
+  This override ensures every text field is at least 16px on webkit devices
+  without changing the visual design (16px ≈ 14px at normal reading distance).
+*/
+/*
+  iOS Safari zooms whenever a focused field has font-size < 16px.
+  !important ensures this beats any Tailwind utility class (e.g. text-sm).
+  touch-action: manipulation stops the 300ms tap-delay / double-tap zoom.
+*/
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  input, select, textarea {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 8px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+

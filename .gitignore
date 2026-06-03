@@ -1,0 +1,31 @@
+# ── Sensitive / secrets ────────────────────────────────────────────
+serviceAccountKey.json
+*.pem
+.env
+.env.*
+!.env.example
+
+# ── Node ───────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Build outputs ──────────────────────────────────────────────────
+dist/
+dist-ssr/
+crawler/dist/
+
+# ── OS / editor ────────────────────────────────────────────────────
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.sw?
+
+# ── Firebase local ─────────────────────────────────────────────────
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

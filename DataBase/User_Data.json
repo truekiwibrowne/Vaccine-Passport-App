@@ -1,0 +1,44 @@
+[
+  {
+    "user_id": "user_001",
+    "Full_Name": "Josh Bean",
+    "Email": "Test2@Test2.com",
+    "Password": "",
+    "Profile Image": "",
+    "Phone Number": "",
+    "Passport Number": "",
+    "Passport Issuing Country": "",
+    "Admin?": false,
+    "Username": "Test2",
+    "Created": "2025-01-21T12:02:21.499Z",
+    "Updated": "2025-01-22T08:38:10.729Z"
+  },
+  {
+    "user_id": "user_002",
+    "Full_Name": "Samatha George",
+    "Email": "Testemail1@testemail.com",
+    "Password": "",
+    "Profile Image": "",
+    "Phone Number": "",
+    "Passport Number": "",
+    "Passport Issuing Country": "",
+    "Admin?": false,
+    "Username": "Testemail1",
+    "Created": "2025-01-21T11:39:06.277Z",
+    "Updated": "2025-01-22T08:44:59.092Z"
+  },
+  {
+    "user_id": "user_003",
+    "Full_Name": "Caleb Brown",
+    "Email": "truekiwibrowne@gmail.com",
+    "Password": "",
+    "Profile Image": "",
+    "Phone Number": "",
+    "Passport Number": "",
+    "Passport Issuing Country": "",
+    "Admin?": true,
+    "Username": "truekiwibrowne",
+    "Created": "2025-01-14T10:51:40.930Z",
+    "Updated": "2025-01-22T08:15:02.619Z"
+  }
+]

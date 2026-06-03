@@ -1,0 +1,386 @@
+rules_version = '2';
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║  VACCINE PASSPORT APP — FIRESTORE SECURITY RULES                        ║
+ * ╠══════════════════════════════════════════════════════════════════════════╣
+ * ║  Data model summary                                                      ║
+ * ║  ─────────────────────────────────────────────────────────────────────  ║
+ * ║  Shared resources (multi-user, top-level collections):                  ║
+ * ║    /FarmAnimals/{animalId}   members[] ← who can read/write             ║
+ * ║    /Pets/{petId}             members[] ← who can read/write             ║
+ * ║    /Dependents/{depId}       members[] ← who can read/write             ║
+ * ║  Each shared resource has: ownerId (creator) + members[] (all users)    ║
+ * ║                                                                          ║
+ * ║  User discovery & sharing:                                               ║
+ * ║    /UserPublicProfiles/{uid}  — email + display name for invite lookup  ║
+ * ║    /ShareInvites/{inviteId}   — invite envelopes                        ║
+ * ║                                                                          ║
+ * ║  Personal data (single-owner, under User_Data):                         ║
+ * ║    /User_Data/{uid}                    — full profile                   ║
+ * ║    /User_Data/{uid}/Vaccines           — personal vaccines              ║
+ * ║    /User_Data/{uid}/Public_Vaccines    — public QR summaries            ║
+ * ║    /User_Data/{uid}/Public_Profile     — first-name for verify page     ║
+ * ║                                                                          ║
+ * ║  Admin / global collections (admin write, auth read):                   ║
+ * ║    /Vaccine_Library   /Animal_Vaccine_Library                           ║
+ * ║    /Clinics           /Practitioners                                     ║
+ * ║    /News_Feed         /Sponsored_Content                                 ║
+ * ║                                                                          ║
+ * ║  NOTE — Future API access:                                               ║
+ * ║    Server-side code using the Firebase Admin SDK (service account)       ║
+ * ║    bypasses ALL rules below. No rule changes needed for a back-end API. ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────── Helper functions ──────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Caller owns this uid slot
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Caller appears in an existing document's members array
+    function isMember(members) {
+      return isSignedIn() && request.auth.uid in members;
+    }
+
+    // Caller included themselves in the members array of a document being created/updated
+    function willBeMember() {
+      return isSignedIn() && request.auth.uid in request.resource.data.members;
+    }
+
+    // Caller is flagged as admin (document exists in Admins/{uid})
+    // Grant admin by creating that document in Firebase Console — no fields required.
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/Admins/$(request.auth.uid));
+    }
+
+    // Caller's practitioner verification level (0 if not registered)
+    function myPractitionerLevel() {
+      let ref = /databases/$(database)/documents/Practitioners/$(request.auth.uid);
+      return exists(ref) ? int(get(ref).data.verificationLevel) : 0;
+    }
+
+
+    // ──────────────────────────── Admin registry ───────────────────────────
+    // Documents are created manually in Firebase Console — never from the app.
+
+    match /Admins/{uid} {
+      allow read:  if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+
+    // ──────────────── Public user profiles (for share lookups) ─────────────
+    // Any signed-in user can look up another user by UID to display their name.
+    // Query by email field is used when sending share invites.
+    // Every user writes their own document on sign-up / profile update.
+
+    match /UserPublicProfiles/{uid} {
+      allow read:   if isSignedIn();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+
+    // ───────────────────────── Share invitations ───────────────────────────
+    // An invite connects an inviter + resource to an invitee email address.
+    // Status lifecycle: pending → accepted | declined | cancelled
+
+    match /ShareInvites/{inviteId} {
+      // Both parties can read their own invites
+      allow read: if isSignedIn() && (
+        resource.data.inviterUid    == request.auth.uid ||
+        resource.data.inviteeUid    == request.auth.uid ||
+        resource.data.inviteeEmail  == request.auth.token.email
+      );
+
+      // Only the inviter can create; they must set their own UID and status = pending
+      allow create: if isSignedIn()
+        && request.resource.data.inviterUid == request.auth.uid
+        && request.resource.data.status     == 'pending';
+
+      // Invitee can accept/decline; inviter can cancel — status must stay valid
+      allow update: if isSignedIn()
+        && (
+          resource.data.inviterUid   == request.auth.uid ||
+          resource.data.inviteeEmail == request.auth.token.email ||
+          resource.data.inviteeUid   == request.auth.uid
+        )
+        && request.resource.data.status in ['pending', 'accepted', 'declined', 'cancelled'];
+
+      // Only the inviter can delete (clean up old invites)
+      allow delete: if isSignedIn() && resource.data.inviterUid == request.auth.uid;
+    }
+
+
+    // ─────────────── Farm animals — shared, top-level collection ───────────
+    // members[] contains every UID that can read and write this animal's record.
+    // ownerId is the original creator; only they (or an admin) can delete.
+
+    match /FarmAnimals/{animalId} {
+      allow read:   if isMember(resource.data.members) || isAdmin();
+      allow create: if willBeMember()
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isMember(resource.data.members) || isAdmin();
+      allow delete: if isSignedIn()
+                    && (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /FarmAnimals/{animalId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete:
+        if isMember(
+          get(/databases/$(database)/documents/FarmAnimals/$(animalId)).data.members
+        ) || isAdmin();
+    }
+
+
+    // ──────────────────── Pets — shared, top-level collection ──────────────
+
+    match /Pets/{petId} {
+      allow read:   if isMember(resource.data.members) || isAdmin();
+      allow create: if willBeMember()
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isMember(resource.data.members) || isAdmin();
+      allow delete: if isSignedIn()
+                    && (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /Pets/{petId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete:
+        if isMember(
+          get(/databases/$(database)/documents/Pets/$(petId)).data.members
+        ) || isAdmin();
+    }
+
+
+    // ──────────────── Dependents — shared, top-level collection ────────────
+
+    match /Dependents/{depId} {
+      allow read:   if isMember(resource.data.members) || isAdmin();
+      allow create: if willBeMember()
+                    && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isMember(resource.data.members) || isAdmin();
+      allow delete: if isSignedIn()
+                    && (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /Dependents/{depId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete:
+        if isMember(
+          get(/databases/$(database)/documents/Dependents/$(depId)).data.members
+        ) || isAdmin();
+    }
+
+
+    // ──────────────────────── User profiles (private) ──────────────────────
+
+    match /User_Data/{uid} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if false;
+    }
+
+
+    // ────────────────────── Personal vaccine records ───────────────────────
+
+    match /User_Data/{uid}/Vaccines/{vaccineId} {
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && request.resource.data.user_id == uid;
+      allow update: if isOwner(uid) || isAdmin() ||
+        // Validator updating their own pending request
+        (isSignedIn()
+          && resource.data.validator_email == request.auth.token.email
+          && resource.data.pending_validation == true);
+      allow delete: if isOwner(uid);
+    }
+
+
+    // ─────────────── Public vaccine summaries (QR verify — no PII) ─────────
+
+    match /User_Data/{uid}/Public_Vaccines/{vaccineId} {
+      allow read:  if true;   // public — needed for QR scanning without auth
+      allow write: if isOwner(uid) || isAdmin() ||
+        (isSignedIn() &&
+          get(/databases/$(database)/documents/User_Data/$(uid)/Vaccines/$(vaccineId))
+            .data.validator_email == request.auth.token.email);
+    }
+
+
+    // ───────────── Public profile (first name only for verify page) ─────────
+
+    match /User_Data/{uid}/Public_Profile/{docId} {
+      allow read:  if true;   // public — needed for QR verify page
+      allow write: if isOwner(uid) || isAdmin();
+    }
+
+
+    // ────────────────────────── Vaccine libraries ──────────────────────────
+
+    match /Vaccine_Library/{vaccineId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /Animal_Vaccine_Library/{entryId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ─────────────────────── Validation requests ───────────────────────────
+
+    match /Validation_Requests/{requestId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid         == resource.data.user_id ||
+        request.auth.token.email == resource.data.validator_email
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.status  == 'pending';
+      allow update: if isSignedIn()
+        && request.auth.token.email == resource.data.validator_email
+        && request.resource.data.status in ['approved', 'rejected'];
+      allow delete: if false;
+    }
+
+
+    // ────────────────────────────── Clinics ────────────────────────────────
+
+    match /Clinics/{clinicId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ──────────────────────────── Practitioners ────────────────────────────
+
+    match /Practitioners/{practitionerId} {
+      allow read: if isSignedIn();
+
+      // Admins have full write access
+      allow create, update, delete: if isAdmin();
+
+      // Self-registration: any signed-in user may create their own doc at level 1
+      allow create: if isSignedIn()
+        && !isAdmin()
+        && practitionerId              == request.auth.uid
+        && request.resource.data.uid   == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.verificationLevel == 1
+        && request.resource.data.active == true;
+
+      // Peer upgrade: a level-2+ practitioner may upgrade someone else to (their level − 1)
+      // Only verificationLevel, verifiedBy, verifiedAt may change — identity fields are frozen.
+      allow update: if isSignedIn()
+        && !isAdmin()
+        && practitionerId != request.auth.uid
+        && myPractitionerLevel() >= 2
+        && request.resource.data.verificationLevel == myPractitionerLevel() - 1
+        && request.resource.data.verificationLevel  > resource.data.verificationLevel
+        && request.resource.data.name        == resource.data.name
+        && request.resource.data.email       == resource.data.email
+        && request.resource.data.clinicId    == resource.data.clinicId
+        && request.resource.data.clinicName  == resource.data.clinicName
+        && request.resource.data.active      == resource.data.active;
+    }
+
+
+    // ──────────────────── Peer verification requests ───────────────────────
+
+    match /Peer_Verifications/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.requester_uid   == request.auth.uid ||
+        resource.data.approver_email  == request.auth.token.email
+      );
+      allow create: if isSignedIn()
+        && request.resource.data.requester_uid   == request.auth.uid
+        && request.resource.data.requester_email == request.auth.token.email
+        && request.resource.data.status          == 'pending';
+      allow update: if isSignedIn()
+        && resource.data.approver_email == request.auth.token.email
+        && resource.data.status         == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.requester_uid  == resource.data.requester_uid
+        && request.resource.data.approver_email == resource.data.approver_email
+        && request.resource.data.target_level   == resource.data.target_level;
+      allow delete: if false;
+    }
+
+
+    // ──────────────────── Passport index (uniqueness check) ────────────────
+
+    match /Passport_Index/{passportNumber} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.uid         == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.uid         == request.auth.uid;
+    }
+
+
+    // ──────────────────────── Push / notifications ─────────────────────────
+
+    match /Scheduled_Notifications/{notifId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /FCM_Tokens/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+
+    // ──────────────────── News feed & sponsored content ────────────────────
+
+    match /News_Feed/{postId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /Sponsored_Content/{contentId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ── Legacy subcollections — owner-only (data pre-dates top-level migration) ─
+    // These paths remain readable/writable so existing data is not lost.
+    // New records are written to the top-level shared collections above.
+
+    match /User_Data/{uid}/Pets/{petId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /User_Data/{uid}/Pets/{petId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /User_Data/{uid}/Dependents/{depId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /User_Data/{uid}/Dependents/{depId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /User_Data/{uid}/FarmAnimals/{animalId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /User_Data/{uid}/FarmAnimals/{animalId}/Vaccines/{vaccineId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+
+
+    // ─── Deny every path not explicitly listed above ────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+  }
+}
