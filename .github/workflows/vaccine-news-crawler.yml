@@ -1,10 +1,15 @@
 name: Vaccine News Crawler
 
-# Runs every 6 hours. Also triggerable manually from the Actions tab.
 on:
   schedule:
-    - cron: '0 */6 * * *'   # 00:00, 06:00, 12:00, 18:00 UTC
-  workflow_dispatch:
+    - cron: '0 */6 * * *'   # Every 6 hours — 00:00, 06:00, 12:00, 18:00 UTC
+  workflow_dispatch:         # Manual trigger from the Actions tab
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/vaccine-news-crawler.yml'
+      - 'crawler/**'
 
 jobs:
   crawl:
@@ -20,8 +25,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: crawler/package-lock.json
 
       - name: Install crawler dependencies
         working-directory: crawler
@@ -30,9 +33,8 @@ jobs:
       - name: Run vaccine news crawler
         working-directory: crawler
         env:
-          # Required
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          # Optional — add either key later to enable AI-powered summaries
+          # Optional — set either to enable AI-powered summaries (no code changes needed)
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
         run: npx ts-node index.ts
