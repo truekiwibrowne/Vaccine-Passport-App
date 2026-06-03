@@ -3,10 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { getPetVaccines, updatePetVaccine, deletePetVaccine } from '../services/petsService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import { getPractitionersForVaccineType } from '../services/practitionersService'
 import { formatDate } from '../utils/dateUtils'
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 import type { PetVaccine } from '../types/pet'
+import type { Clinic, Practitioner } from '../types/admin'
 
 export function PetVaccineDetailPage() {
   const { user } = useAuth()
@@ -27,6 +32,13 @@ export function PetVaccineDetailPage() {
     Expiration_date: '',
     Notes: '',
   })
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
+
+  useEffect(() => {
+    getClinicsForVaccineType('veterinary').then(setClinics)
+    getPractitionersForVaccineType('veterinary').then(setPractitioners)
+  }, [])
 
   useEffect(() => {
     if (!user || !petId) return
@@ -137,8 +149,25 @@ export function PetVaccineDetailPage() {
         ) : editing ? (
           <div className="flex flex-col gap-4">
             <Input label="Date administered *" type="date" value={form.date_administration} onChange={e => update('date_administration', e.target.value)} />
-            <Input label="Clinic / Vet" value={form.Clinic} onChange={e => update('Clinic', e.target.value)} placeholder="City Veterinary Clinic" />
-            <Input label="Vet Name" value={form.Doctor} onChange={e => update('Doctor', e.target.value)} placeholder="Dr. Jane Smith" />
+            <ClinicCombobox
+              value={form.Clinic}
+              onChange={v => update('Clinic', v)}
+              clinics={clinics}
+              label="Veterinary Clinic"
+              placeholder="Search registered vet clinics or type a name…"
+            />
+            <PractitionerCombobox
+              value={form.Doctor}
+              onChange={v => update('Doctor', v)}
+              onSelect={(name, clinicName) => {
+                update('Doctor', name)
+                if (!form.Clinic && clinicName) update('Clinic', clinicName)
+              }}
+              practitioners={practitioners}
+              label="Veterinarian"
+              placeholder="Search registered vets or type a name…"
+              preferClinic={form.Clinic}
+            />
             <Input label="Expiry date (optional)" type="date" value={form.Expiration_date} onChange={e => update('Expiration_date', e.target.value)} />
             <div>
               <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">Notes (optional)</label>

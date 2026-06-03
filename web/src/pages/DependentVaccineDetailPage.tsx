@@ -3,10 +3,15 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { getDependentVaccines, updateDependentVaccine, deleteDependentVaccine } from '../services/dependentsService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import { getPractitionersForVaccineType } from '../services/practitionersService'
 import { formatDate } from '../utils/dateUtils'
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 import type { UserVaccine } from '../types/vaccine'
+import type { Clinic, Practitioner } from '../types/admin'
 
 function statusInfo(v: UserVaccine) {
   if (v.pending_validation) return { text: 'Pending', colour: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300' }
@@ -27,6 +32,13 @@ export function DependentVaccineDetailPage() {
   const [deleting, setDeleting] = useState(false)
 
   const [form, setForm] = useState({ date_administration: '', Clinic: '', Doctor: '', Expiration_date: '' })
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
+
+  useEffect(() => {
+    getClinicsForVaccineType('human').then(setClinics)
+    getPractitionersForVaccineType('human').then(setPractitioners)
+  }, [])
 
   useEffect(() => {
     if (!user || !depId) return
@@ -133,8 +145,22 @@ export function DependentVaccineDetailPage() {
         ) : editing ? (
           <div className="flex flex-col gap-4">
             <Input label="Date administered *" type="date" value={form.date_administration} onChange={e => update('date_administration', e.target.value)} />
-            <Input label="Clinic" value={form.Clinic} onChange={e => update('Clinic', e.target.value)} />
-            <Input label="Doctor" value={form.Doctor} onChange={e => update('Doctor', e.target.value)} />
+            <ClinicCombobox
+              value={form.Clinic}
+              onChange={v => update('Clinic', v)}
+              clinics={clinics}
+            />
+            <PractitionerCombobox
+              value={form.Doctor}
+              onChange={v => update('Doctor', v)}
+              onSelect={(name, clinicName) => {
+                update('Doctor', name)
+                if (!form.Clinic && clinicName) update('Clinic', clinicName)
+              }}
+              practitioners={practitioners}
+              label="Doctor / Nurse"
+              preferClinic={form.Clinic}
+            />
             <Input label="Expiry date (optional)" type="date" value={form.Expiration_date} onChange={e => update('Expiration_date', e.target.value)} />
             <Button size="lg" fullWidth loading={saving} onClick={saveEdit}>Save Changes</Button>
             <button onClick={() => setEditing(false)} className="text-sm text-gray-400 text-center py-2">Cancel</button>

@@ -6,13 +6,16 @@ import { useUserVaccines } from '../hooks/useUserVaccines'
 import { deleteUserVaccine, updateUserVaccine } from '../services/vaccineService'
 import { createValidationRequest } from '../services/validationService'
 import { uploadFile } from '../services/storageService'
-import { getPractitionerByEmail } from '../services/practitionersService'
-import type { Practitioner } from '../types/admin'
+import { getPractitionerByEmail, getPractitionersForVaccineType } from '../services/practitionersService'
+import { getClinicsForVaccineType } from '../services/clinicsService'
+import type { Practitioner, Clinic } from '../types/admin'
 import { VERIFICATION_LEVEL_LABELS, VERIFICATION_LEVEL_COLOURS } from '../types/admin'
 import { VaccineStatusPill } from '../components/vaccine/VaccineStatusPill'
 import { Modal } from '../components/ui/Modal'
 import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
+import { ClinicCombobox } from '../components/ui/ClinicCombobox'
+import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
 import { formatDate, isExpired, isoNow } from '../utils/dateUtils'
 
 export function VaccineDetailPage() {
@@ -43,6 +46,14 @@ export function VaccineDetailPage() {
     Expiration_date: '',
   })
   const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null)
+
+  // Clinic / practitioner combobox data (human vaccines)
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [practitioners, setPractitioners] = useState<Practitioner[]>([])
+  useEffect(() => {
+    getClinicsForVaccineType('human').then(setClinics)
+    getPractitionersForVaccineType('human').then(setPractitioners)
+  }, [])
 
   function startEdit() {
     if (!vaccine) return
@@ -372,15 +383,24 @@ export function VaccineDetailPage() {
                 value={editForm.date_administration}
                 onChange={e => setEditForm(f => ({ ...f, date_administration: e.target.value }))}
               />
-              <Input
-                label="Clinic / Hospital"
+              <ClinicCombobox
                 value={editForm.Clinic}
-                onChange={e => setEditForm(f => ({ ...f, Clinic: e.target.value }))}
+                onChange={v => setEditForm(f => ({ ...f, Clinic: v }))}
+                clinics={clinics}
               />
-              <Input
-                label="Doctor / Nurse"
+              <PractitionerCombobox
                 value={editForm.Doctor}
-                onChange={e => setEditForm(f => ({ ...f, Doctor: e.target.value }))}
+                onChange={v => setEditForm(f => ({ ...f, Doctor: v }))}
+                onSelect={(name, clinicName) => {
+                  setEditForm(f => ({
+                    ...f,
+                    Doctor: name,
+                    Clinic: f.Clinic || clinicName,
+                  }))
+                }}
+                practitioners={practitioners}
+                label="Doctor / Nurse"
+                preferClinic={editForm.Clinic}
               />
               <Input
                 label="Expiry date"
