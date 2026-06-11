@@ -54,6 +54,7 @@ export async function getFarmAnimals(uid: string): Promise<FarmAnimal[]> {
   }
 
   return Array.from(map.values())
+    .filter(a => !a.archived)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
@@ -86,6 +87,31 @@ export async function updateFarmAnimal(
 }
 
 export async function deleteFarmAnimal(_uid: string, animalId: string): Promise<void> {
+  await deleteDoc(doc(farmCol(), animalId))
+}
+
+/** Soft-delete: mark as archived (hidden from active lists) */
+export async function archiveFarmAnimal(_uid: string, animalId: string): Promise<void> {
+  await updateDoc(doc(farmCol(), animalId), { archived: true, archivedAt: isoNow() })
+}
+
+/** Return all archived animals the user has access to */
+export async function getArchivedFarmAnimals(uid: string): Promise<FarmAnimal[]> {
+  const snap = await getDocs(
+    query(farmCol(), where('members', 'array-contains', uid), where('archived', '==', true))
+  )
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as FarmAnimal))
+    .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''))
+}
+
+/** Restore a previously archived animal back to the active list */
+export async function restoreFarmAnimal(_uid: string, animalId: string): Promise<void> {
+  await updateDoc(doc(farmCol(), animalId), { archived: false, archivedAt: null })
+}
+
+/** Permanently delete an animal — no recovery possible */
+export async function permanentlyDeleteFarmAnimal(_uid: string, animalId: string): Promise<void> {
   await deleteDoc(doc(farmCol(), animalId))
 }
 

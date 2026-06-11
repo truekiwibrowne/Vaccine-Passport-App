@@ -6,8 +6,10 @@ import {
   getAllNewsPosts, createNewsPost, updateNewsPost, deleteNewsPost,
   getPendingNewsPosts,
   getAllSponsoredContent, createSponsoredContent, updateSponsoredContent, deleteSponsoredContent,
+  getNotificationConfig, updateNotificationConfig,
 } from '../services/newsFeedService'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -249,10 +251,13 @@ function NewsSection({ isLg }: { isLg: boolean }) {
 
   if (isLg) {
     return (
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">{listPanel}</div>
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">{editForm}</div>
-      </div>
+      <ResizableSplitPane
+        storageKey="splitPane:adminFeedNews"
+        leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+        rightClassName="overflow-y-auto bg-gray-50 dark:bg-gray-900"
+        left={listPanel}
+        right={editForm}
+      />
     )
   }
   return <div className="flex-1">{showDetail ? editForm : listPanel}</div>
@@ -401,10 +406,13 @@ function SponsoredSection({ isLg }: { isLg: boolean }) {
 
   if (isLg) {
     return (
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">{listPanel}</div>
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">{editForm}</div>
-      </div>
+      <ResizableSplitPane
+        storageKey="splitPane:adminFeedSponsored"
+        leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+        rightClassName="overflow-y-auto bg-gray-50 dark:bg-gray-900"
+        left={listPanel}
+        right={editForm}
+      />
     )
   }
   return <div className="flex-1">{showDetail ? editForm : listPanel}</div>
@@ -425,15 +433,35 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [approveForm, setApproveForm] = useState<NewsForm | null>(null)
   const [saving, setSaving] = useState(false)
+  const [autoPush, setAutoPush] = useState(false)
+  const [autoPushSaving, setAutoPushSaving] = useState(false)
 
   async function load() {
     setLoading(true)
-    const data = await getPendingNewsPosts().catch(() => [])
+    const [data, config] = await Promise.all([
+      getPendingNewsPosts().catch(() => []),
+      getNotificationConfig().catch(() => ({ autoPushCrawledNews: false })),
+    ])
     setItems(data)
     onPendingCount(data.length)
+    setAutoPush(config.autoPushCrawledNews)
     setLoading(false)
   }
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function toggleAutoPush() {
+    const next = !autoPush
+    setAutoPush(next)
+    setAutoPushSaving(true)
+    try {
+      await updateNotificationConfig({ autoPushCrawledNews: next })
+    } catch {
+      setAutoPush(!next)
+      alert('Failed to save setting. Please try again.')
+    } finally {
+      setAutoPushSaving(false)
+    }
+  }
 
   function openApprove(p: NewsFeedPost) {
     setApprovingId(p.id)
@@ -480,6 +508,36 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
 
   const listPanel = (
     <div className="p-4 flex flex-col gap-3 pb-10">
+      {/* Auto-push settings card */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 dark:text-white">Auto-publish crawled news</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 leading-relaxed">
+              {autoPush
+                ? 'ON — crawled items are automatically published and pushed to users every 30 minutes without manual review.'
+                : 'OFF — crawled items wait in this queue for manual review before being published.'}
+            </p>
+          </div>
+          <button
+            onClick={toggleAutoPush}
+            disabled={autoPushSaving}
+            className={`flex-shrink-0 w-12 h-6 rounded-full transition-colors flex items-center px-0.5 disabled:opacity-50 ${
+              autoPush ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-600'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${autoPush ? 'translate-x-6' : ''}`} />
+          </button>
+        </div>
+        {autoPush && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40">
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              <span className="font-semibold">Heads up:</span> crawler posts will be pushed to all targeted users without review. Turn off to review each item first.
+            </p>
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <p className="text-sm text-gray-400 text-center py-8">Loading…</p>
       ) : items.length === 0 ? (
@@ -497,6 +555,7 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
           {/* Thumbnail strip when image available */}
           {p.imageUrl && (
             <img src={p.imageUrl} alt="" className="w-full h-32 object-cover"
+              referrerPolicy="no-referrer"
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
           )}
           <div className="p-4">
@@ -613,10 +672,13 @@ function CrawlerQueueSection({ isLg, onPendingCount }: { isLg: boolean; onPendin
 
   if (isLg) {
     return (
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">{listPanel}</div>
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">{approvePanel}</div>
-      </div>
+      <ResizableSplitPane
+        storageKey="splitPane:adminFeedCrawler"
+        leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+        rightClassName="overflow-y-auto bg-gray-50 dark:bg-gray-900"
+        left={listPanel}
+        right={approvePanel}
+      />
     )
   }
   return <div className="flex-1">{approvingId ? approvePanel : listPanel}</div>

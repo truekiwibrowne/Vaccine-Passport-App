@@ -197,13 +197,21 @@ service cloud.firestore {
 
     match /User_Data/{uid}/Vaccines/{vaccineId} {
       allow read:   if isOwner(uid) || isAdmin();
-      allow create: if isOwner(uid) && request.resource.data.user_id == uid;
+      allow create: if (isOwner(uid) && request.resource.data.user_id == uid)
+                    || isAdmin();   // admin can auto-create on approval
       allow update: if isOwner(uid) || isAdmin() ||
         // Validator updating their own pending request
         (isSignedIn()
           && resource.data.validator_email == request.auth.token.email
           && resource.data.pending_validation == true);
       allow delete: if isOwner(uid);
+    }
+
+
+    // ──────────────── Private sexual health records (PIN-gated in app) ───────
+
+    match /User_Data/{uid}/SexualHealth/{recordId} {
+      allow read, create, update, delete: if isOwner(uid);
     }
 
 
@@ -335,8 +343,26 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // App-wide config (notification settings, feature flags) — admin write, admin read
+    match /App_Config/{docId} {
+      allow read:  if isSignedIn();  // admins need to read; non-admins blocked by UI
+      allow write: if isAdmin();
+    }
+
     match /FCM_Tokens/{uid} {
       allow read, write: if isOwner(uid);
+    }
+
+    // ── User in-app notifications (approval / rejection feedback) ──────────────
+    // Written by admins; read and marked-read by the owning user.
+
+    match /User_Notifications/{uid}/items/{notifId} {
+      allow read:   if isOwner(uid);
+      allow update: if isOwner(uid)
+                    && request.resource.data.keys().hasOnly(request.resource.data.keys())
+                    && request.resource.data.read == true;   // only allow marking as read
+      allow create: if isAdmin();
+      allow delete: if false;
     }
 
     // Written only by the Netlify expiry-reminders backend function (Admin SDK bypasses rules).
@@ -356,6 +382,41 @@ service cloud.firestore {
     match /Sponsored_Content/{contentId} {
       allow read:  if isSignedIn();
       allow write: if isAdmin();
+    }
+
+
+    // ─────────────── Pending user submissions (await admin review) ────────────
+    // Any signed-in user may submit; only they (or an admin) may read their own.
+    // Only admins may update (approve / reject). Nobody deletes — history is preserved.
+
+    match /PendingClinics/{docId} {
+      allow create: if isSignedIn()
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow read:   if isAdmin()
+        || (isSignedIn() && resource.data.submittedByUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /PendingPractitioners/{docId} {
+      allow create: if isSignedIn()
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow read:   if isAdmin()
+        || (isSignedIn() && resource.data.submittedByUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /PendingVaccines/{docId} {
+      allow create: if isSignedIn()
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow read:   if isAdmin()
+        || (isSignedIn() && resource.data.submittedByUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
 
@@ -380,6 +441,67 @@ service cloud.firestore {
     }
     match /User_Data/{uid}/FarmAnimals/{animalId}/Vaccines/{vaccineId} {
       allow read, create, update, delete: if isOwner(uid);
+    }
+
+
+    // ─── Cross-device PIN setup authorisation for Private Health Records ────
+    // The requesting device (phone) creates the document; the approving device
+    // (desktop, same account) updates status to 'approved' or 'denied'.
+    // Documents are short-lived (5-min TTL) and contain NO health data — only a
+    // status flag and a device hint string.
+
+    match /User_Data/{uid}/PHR_Auth_Requests/{reqId} {
+      // Owner can read (both devices poll / listen to this)
+      allow read: if isOwner(uid);
+
+      // Requesting device creates the document (status must start as 'pending')
+      allow create: if isOwner(uid)
+        && request.resource.data.status == 'pending';
+
+      // Approving device updates status only — no other fields may change
+      allow update: if isOwner(uid)
+        && request.resource.data.status in ['approved', 'denied']
+        && request.resource.data.requestedAt == resource.data.requestedAt
+        && request.resource.data.expiresAt   == resource.data.expiresAt
+        && request.resource.data.deviceHint  == resource.data.deviceHint;
+
+      // Either device can clean up after the request is acted on
+      allow delete: if isOwner(uid);
+    }
+
+
+    // ────────── Public sexual health summaries (QR share — no PII) ──────────
+    // Written by the owner when they hit "Update QR"; deleted when sharing disabled.
+    // Anyone can read (partner scans QR without logging in).
+
+    match /PublicSexualHealth/{token} {
+      allow read: if true;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+
+    // ─────────────────────────── STI Library ──────────────────────────────────
+
+    match /STI_Library/{entryId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ──────────────── Disease risk map data (admin-managed overrides) ──────────
+    // Keyed by Vaccine_Library entry ID.
+    // Public read — anyone (including unauthenticated QR scanners) can fetch the
+    // map data when viewing a vaccine detail page or the verify page.
+    // Write is admin-only.
+
+    match /Disease_Risk/{entryId} {
+      allow read:  if true;
+      allow write: if isAdmin();
     }
 
 

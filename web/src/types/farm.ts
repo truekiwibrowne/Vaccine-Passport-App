@@ -165,6 +165,11 @@ export interface FarmAnimal {
 
   notes?:    string
   createdAt: string
+
+  /** Soft-delete: true when the animal has been archived */
+  archived?: boolean
+  /** ISO timestamp when the animal was archived */
+  archivedAt?: string | null
 }
 
 export interface FarmVaccine {

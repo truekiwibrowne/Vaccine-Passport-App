@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  getDocs,
+  getDocs, getDoc, setDoc,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { NewsFeedPost, SponsoredContent } from '../types/newsFeed'
@@ -86,6 +86,24 @@ export async function updateSponsoredContent(id: string, data: Partial<Omit<Spon
 
 export async function deleteSponsoredContent(id: string): Promise<void> {
   await deleteDoc(doc(db, SPONSORED_COL, id))
+}
+
+// ── App Config — notification settings ───────────────────────────────────────
+
+export interface NotificationConfig {
+  autoPushCrawledNews: boolean
+}
+
+const CONFIG_DOC = doc(db, 'App_Config', 'notifications')
+
+export async function getNotificationConfig(): Promise<NotificationConfig> {
+  const snap = await getDoc(CONFIG_DOC)
+  if (snap.exists()) return snap.data() as NotificationConfig
+  return { autoPushCrawledNews: false }
+}
+
+export async function updateNotificationConfig(config: Partial<NotificationConfig>): Promise<void> {
+  await setDoc(CONFIG_DOC, config, { merge: true })
 }
 
 // ── Client-side targeting filter ──────────────────────────────────────────────

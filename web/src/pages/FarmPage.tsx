@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { getFarmAnimals, deleteFarmAnimal, updateFarmAnimal } from '../services/farmService'
+import { getFarmAnimals, archiveFarmAnimal, updateFarmAnimal } from '../services/farmService'
 import { sendShareInvite } from '../services/sharingService'
 import type { FarmAnimal, FarmSpecies, FarmAnimalStatus } from '../types/farm'
 import {
@@ -40,25 +40,47 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'status',     label: 'Status',        defaultVisible: true,  alwaysVisible: true },
 ]
 
-// Fixed-width classes per column — same class used in header and cell rows.
-// Fixed widths (not flex-1) are required for horizontal scroll to work correctly.
-const COL_CLASS: Record<ColKey, string> = {
-  tag:        'w-20 flex-shrink-0',
-  name:       'w-32 flex-shrink-0',
-  species:    'w-14 flex-shrink-0',
-  breed:      'w-28 flex-shrink-0',
-  sex:        'w-9  flex-shrink-0',
-  dob:        'w-24 flex-shrink-0',
-  herd:       'w-28 flex-shrink-0',
-  paddock:    'w-28 flex-shrink-0',
-  chipId:     'w-24 flex-shrink-0',
-  nationalId: 'w-28 flex-shrink-0',
-  weight:     'w-16 flex-shrink-0',
-  purpose:    'w-28 flex-shrink-0',
-  status:     'w-36 flex-shrink-0',
+// Default pixel widths per column (used for header + cell rows via inline style).
+const COL_DEFAULT_WIDTH: Record<ColKey, number> = {
+  tag:        82,
+  name:       130,
+  species:    62,
+  breed:      112,
+  sex:        44,
+  dob:        98,
+  herd:       112,
+  paddock:    112,
+  chipId:     98,
+  nationalId: 112,
+  weight:     66,
+  purpose:    112,
+  status:     144,
 }
+const COL_MIN_WIDTH = 40
+const COL_MAX_WIDTH = 400
 
-const COL_STORAGE_KEY = 'farm_table_cols_v1'
+const COL_STORAGE_KEY    = 'farm_table_cols_v1'
+const COL_WIDTHS_STORAGE = 'farm_table_col_widths_v1'
+
+type ColWidths = Record<ColKey, number>
+
+function loadColWidths(): ColWidths {
+  try {
+    const raw = localStorage.getItem(COL_WIDTHS_STORAGE)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ColWidths>
+      return Object.fromEntries(
+        (Object.keys(COL_DEFAULT_WIDTH) as ColKey[]).map(k => [
+          k,
+          typeof parsed[k] === 'number'
+            ? Math.min(COL_MAX_WIDTH, Math.max(COL_MIN_WIDTH, parsed[k]!))
+            : COL_DEFAULT_WIDTH[k],
+        ])
+      ) as ColWidths
+    }
+  } catch { /* ignore */ }
+  return { ...COL_DEFAULT_WIDTH }
+}
 
 type ColConfig = { key: ColKey; visible: boolean }[]
 
@@ -126,6 +148,51 @@ export function FarmPage() {
   // ── Column config ───────────────────────────────────────────────────────────
   const [colConfig, setColConfig] = useState<ColConfig>(loadColConfig)
   const [colSettingsOpen, setColSettingsOpen] = useState(false)
+
+  // ── Column widths (resizable) ───────────────────────────────────────────────
+  const [colWidths, setColWidths] = useState<ColWidths>(loadColWidths)
+
+  const resizingCol  = useRef<ColKey | null>(null)
+  const resizeStartX = useRef(0)
+  const resizeStartW = useRef(0)
+
+  function startColResize(e: React.MouseEvent, key: ColKey) {
+    e.preventDefault()
+    e.stopPropagation()
+    resizingCol.current  = key
+    resizeStartX.current = e.clientX
+    resizeStartW.current = colWidths[key]
+    document.body.style.cursor    = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(ev: MouseEvent) {
+      if (!resizingCol.current) return
+      const delta = ev.clientX - resizeStartX.current
+      const next  = Math.min(COL_MAX_WIDTH, Math.max(COL_MIN_WIDTH, resizeStartW.current + delta))
+      setColWidths(prev => ({ ...prev, [resizingCol.current!]: next }))
+    }
+
+    function onUp() {
+      document.body.style.cursor    = ''
+      document.body.style.userSelect = ''
+      resizingCol.current = null
+      setColWidths(prev => {
+        localStorage.setItem(COL_WIDTHS_STORAGE, JSON.stringify(prev))
+        return prev
+      })
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  function resetColWidths() {
+    const defaults = { ...COL_DEFAULT_WIDTH }
+    setColWidths(defaults)
+    localStorage.setItem(COL_WIDTHS_STORAGE, JSON.stringify(defaults))
+  }
 
   // ── Horizontal-scroll sync refs ─────────────────────────────────────────────
   // The sticky column header (overflow-x-hidden) mirrors the body scroll position.
@@ -364,12 +431,24 @@ export function FarmPage() {
   async function handleDelete(animal: FarmAnimal) {
     if (!user) return
     const label = animal.name ?? `#${animal.tagNumber}`
-    if (!window.confirm(`Remove ${label} from records? Vaccine history will not be deleted.`)) return
+    if (!window.confirm(`Archive ${label}? The record will be moved to the archive and can be restored later.`)) return
     try {
-      await deleteFarmAnimal(user.uid, animal.id)
+      await archiveFarmAnimal(user.uid, animal.id)
       setAnimals(prev => prev.filter(a => a.id !== animal.id))
     } catch {
-      alert('Error deleting. Please try again.')
+      alert('Error archiving. Please try again.')
+    }
+  }
+
+  async function handleBulkArchive() {
+    if (!user || selectedIds.size === 0) return
+    if (!window.confirm(`Archive ${selectedIds.size} animal${selectedIds.size !== 1 ? 's' : ''}? They can be restored from the archive.`)) return
+    try {
+      await Promise.all(Array.from(selectedIds).map(id => archiveFarmAnimal(user.uid, id)))
+      setAnimals(prev => prev.filter(a => !selectedIds.has(a.id)))
+      exitSelectionMode()
+    } catch {
+      alert('Error archiving. Please try again.')
     }
   }
 
@@ -444,10 +523,10 @@ export function FarmPage() {
   const inactiveCount = animals.length - activeCount
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 font-sans">
+    <div className="h-screen overflow-hidden flex flex-col bg-gray-50 dark:bg-gray-900 font-sans">
 
       {/* ── Professional header ── */}
-      <div className="bg-white dark:bg-gray-800 sticky top-0 z-10">
+      <div className="bg-white dark:bg-gray-800 flex-shrink-0">
         <div className="px-4 pt-safe">
           {/* Title row */}
           <div className="flex items-center justify-between h-14">
@@ -462,16 +541,16 @@ export function FarmPage() {
               ) : (
                 <button
                   onClick={() => navigate('/')}
-                  className="p-1.5 -ml-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  className="p-2 -ml-2"
                   aria-label="Back to home"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
               )}
               <div>
-                <h1 className="text-base font-bold text-gray-900 dark:text-white tracking-tight uppercase">
+                <h1 className="text-base font-semibold text-gray-900 dark:text-white">
                   {selectionMode ? `${selectedIds.size} Selected` : 'Farm Management'}
                 </h1>
                 {!selectionMode && (
@@ -532,6 +611,16 @@ export function FarmPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
                     </svg>
                     <span className="hidden sm:inline">Import</span>
+                  </button>
+                  <button
+                    onClick={() => navigate('/farm/archive')}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 active:bg-gray-50"
+                    title="View archived animals"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                    </svg>
+                    <span className="hidden sm:inline">Archive</span>
                   </button>
                   <button
                     onClick={() => navigate('/farm/add')}
@@ -606,10 +695,23 @@ export function FarmPage() {
               {visibleCols.map(col => {
                 const def = ALL_COLUMNS.find(c => c.key === col.key)!
                 return (
-                  <div key={col.key} className={COL_CLASS[col.key]}>
-                    <span className={`block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest truncate ${col.key === 'status' ? 'text-right' : ''}`}>
+                  <div
+                    key={col.key}
+                    className="flex-shrink-0 relative group"
+                    style={{ width: colWidths[col.key] }}
+                  >
+                    <span className={`block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest truncate pr-2 ${col.key === 'status' ? 'text-right' : ''}`}>
                       {def.label}
                     </span>
+                    {/* Resize handle */}
+                    <div
+                      onMouseDown={e => startColResize(e, col.key)}
+                      onDoubleClick={() => setColWidths(prev => ({ ...prev, [col.key]: COL_DEFAULT_WIDTH[col.key] }))}
+                      className="absolute right-0 top-0 bottom-0 w-3 flex items-center justify-center cursor-col-resize z-10"
+                      title="Drag to resize · Double-click to reset"
+                    >
+                      <div className="w-0.5 h-3 bg-gray-300 dark:bg-gray-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
                   </div>
                 )
               })}
@@ -618,13 +720,15 @@ export function FarmPage() {
         )}
       </div>
 
+      {/* ── Scrollable content area — fills remaining viewport height ── */}
+      <div className="flex-1 flex flex-col min-h-0">
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
           <div className="w-6 h-6 border-2 border-gray-200 border-t-green-600 rounded-full animate-spin" />
           <p className="text-xs text-gray-400 uppercase tracking-widest">Loading records…</p>
         </div>
       ) : animals.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 px-6">
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
           <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
             <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -651,8 +755,8 @@ export function FarmPage() {
         </div>
       ) : (
         <>
-        {/* Stats bar — full-width, scrolls with page */}
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2.5 flex items-center gap-4">
+        {/* Stats bar — fixed, never scrolls */}
+        <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2.5 flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="text-lg font-bold text-gray-900 dark:text-white">{activeCount}</span>
             <span className="text-xs text-gray-400 uppercase tracking-wide">Active</span>
@@ -692,10 +796,10 @@ export function FarmPage() {
           </div>
         </div>
 
-        {/* Horizontally-scrollable table body — syncs with sticky column header */}
+        {/* Table body — only this div scrolls; header/stats stay fixed above */}
         <div
           ref={tableBodyRef}
-          className={`overflow-x-auto ${selectionMode ? 'pb-32' : 'pb-16'}`}
+          className={`flex-1 min-h-0 overflow-y-auto overflow-x-auto overscroll-contain ${selectionMode ? 'pb-32' : 'pb-16'}`}
           onScroll={syncColHeader}
         >
           <div className="min-w-max">
@@ -772,7 +876,11 @@ export function FarmPage() {
                         {/* Dynamic columns */}
                         <div className="flex items-center gap-2">
                           {visibleCols.map(col => (
-                            <div key={col.key} className={COL_CLASS[col.key]}>
+                            <div
+                              key={col.key}
+                              className="flex-shrink-0 min-w-0"
+                              style={{ width: colWidths[col.key] }}
+                            >
                               {renderCell(animal, col.key)}
                             </div>
                           ))}
@@ -787,6 +895,7 @@ export function FarmPage() {
         </div>
         </>
       )}
+      </div>{/* end scrollable content area */}
 
       {/* ── Selection mode action bar ─────────────────────────────────────────── */}
       {selectionMode && (
@@ -830,6 +939,15 @@ export function FarmPage() {
                 </svg>
                 Edit
               </button>
+              <button
+                onClick={handleBulkArchive}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-xs font-semibold text-red-600 dark:text-red-400 active:bg-red-50 dark:active:bg-red-900/20"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                Archive
+              </button>
             </div>
           )}
         </div>
@@ -846,14 +964,22 @@ export function FarmPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-base font-bold text-gray-900 dark:text-white">Table Columns</h2>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Toggle visibility and drag to reorder</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Toggle visibility, drag to reorder, drag header edge to resize</p>
                 </div>
-                <button
-                  onClick={resetCols}
-                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  Reset defaults
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={resetColWidths}
+                    className="text-xs font-semibold text-gray-400 dark:text-gray-500 hover:underline"
+                  >
+                    Reset widths
+                  </button>
+                  <button
+                    onClick={resetCols}
+                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Reset defaults
+                  </button>
+                </div>
               </div>
             </div>
 

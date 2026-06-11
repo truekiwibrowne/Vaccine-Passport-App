@@ -40,6 +40,9 @@ function checkRule(rule, user) {
   switch (rule.type) {
     case 'all': return true
 
+    case 'specificUser':
+      return user.user_id === rule.uid
+
     case 'location': {
       const country = user.Passport_Issuing_Country || user.currentCountry || user.travelDestination || ''
       return rule.countries?.some(c => c.toUpperCase() === country.toUpperCase()) ?? false
@@ -71,6 +74,15 @@ function checkRule(rule, user) {
 }
 
 async function getMatchingTokens(targets) {
+  // Fast path: single-user target — look up only that user's token
+  if (targets.length === 1 && targets[0].type === 'specificUser') {
+    const { uid } = targets[0]
+    if (!uid) return []
+    const tokenSnap = await db.collection('FCM_Tokens').doc(uid).get()
+    const token = tokenSnap.exists ? tokenSnap.data().token : null
+    return token ? [token] : []
+  }
+
   const tokenSnap = await db.collection('FCM_Tokens').get()
   if (targets.some(t => t.type === 'all')) {
     return tokenSnap.docs.map(d => d.data().token).filter(Boolean)
@@ -143,6 +155,22 @@ async function processScheduledNotifications() {
 // ── B: News post push notifications ──────────────────────────────────────────
 
 async function processNewsPushes() {
+  // Check admin config — if autoPushCrawledNews is on, auto-approve pending crawler posts first.
+  const configSnap = await db.collection('App_Config').doc('notifications').get()
+  const autoPushEnabled = configSnap.exists ? configSnap.data()?.autoPushCrawledNews === true : false
+
+  if (autoPushEnabled) {
+    const pendingSnap = await db.collection('News_Feed').where('status', '==', 'pending').get()
+    const crawlerPending = pendingSnap.docs.filter(d => d.data().crawledAt)
+    if (crawlerPending.length > 0) {
+      console.log(`[news] Auto-approving ${crawlerPending.length} crawled post(s)…`)
+      const now = new Date().toISOString()
+      await Promise.all(crawlerPending.map(d =>
+        d.ref.update({ status: 'active', pushSent: false, publishedAt: d.data().publishedAt || now, updatedAt: now })
+      ))
+    }
+  }
+
   // Firestore can't do "field does not exist OR field == false" in one query,
   // so we run two queries and deduplicate by document ID.
   const [explicitFalse, missing] = await Promise.all([

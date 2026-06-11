@@ -17,6 +17,7 @@ import { PET_SPECIES_EMOJI, PET_SPECIES_LABELS } from '../types/pet'
 import { FARM_SPECIES_EMOJI } from '../types/farm'
 import { formatDate } from '../utils/dateUtils'
 import { getUpcomingExpiries } from './CalendarPage'
+import { getSHQuickAccess } from '../services/sexualHealthService'
 
 import {
   DndContext,
@@ -37,10 +38,10 @@ import { CSS } from '@dnd-kit/utilities'
 
 // ── Tile IDs ──────────────────────────────────────────────────────────────────
 
-type TileId = 'vaccines' | 'news' | 'dependents' | 'pets' | 'farm' | 'sponsored' | 'passport' | 'library' | 'validation' | 'calendar'
+type TileId = 'vaccines' | 'news' | 'dependents' | 'pets' | 'farm' | 'sponsored' | 'passport' | 'library' | 'validation' | 'calendar' | 'private_health'
 
 const DEFAULT_ORDER: TileId[] = [
-  'vaccines', 'news', 'dependents', 'pets', 'farm', 'calendar', 'sponsored', 'passport', 'library', 'validation',
+  'vaccines', 'news', 'dependents', 'pets', 'farm', 'calendar', 'sponsored', 'passport', 'library', 'validation', 'private_health',
 ]
 
 // In farm mode only these tiles are shown (unless in edit mode)
@@ -120,10 +121,10 @@ function Tile({ icon, label, labelColour, meta, onClick, editMode, dragHandlePro
 
 // ── Sortable wrapper ───────────────────────────────────────────────────────────
 
-function SortableTile({ id, editMode, wideOnDesktop, children }: {
+function SortableTile({ id, editMode, colSpan, children }: {
   id: string
   editMode: boolean
-  wideOnDesktop?: boolean
+  colSpan: string   // '' = one column, 'md:col-span-2' = full row
   children: (handleProps: Record<string, unknown>) => React.ReactNode
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
@@ -136,7 +137,7 @@ function SortableTile({ id, editMode, wideOnDesktop, children }: {
   }
 
   return (
-    <div ref={setNodeRef} style={style} className={wideOnDesktop ? 'md:col-span-2' : ''}>
+    <div ref={setNodeRef} style={style} className={colSpan}>
       {children(editMode ? { ...attributes, ...listeners } : {})}
     </div>
   )
@@ -264,6 +265,7 @@ export function HomePage() {
 
   const [tileOrder, setTileOrder] = useState<TileId[]>(() => loadOrder())
   const [editMode, setEditMode] = useState(false)
+  const shQuickAccess = user ? getSHQuickAccess(user.uid) : false
   const [fabOpen, setFabOpen] = useState(false)
 
   const headerRef = useRef<HTMLDivElement>(null)
@@ -409,6 +411,7 @@ export function HomePage() {
                       src={visibleNews.imageUrl}
                       alt={visibleNews.title}
                       className="w-full h-44 object-cover"
+                      referrerPolicy="no-referrer"
                       onError={e => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }}
                     />
                   </div>
@@ -757,18 +760,95 @@ export function HomePage() {
         )
       }
 
+      case 'private_health': {
+        return (
+          <Tile
+            icon="🔒"
+            label="Private Health"
+            labelColour="text-violet-600 dark:text-violet-400"
+            onClick={() => navigate('/health/sexual')}
+            editMode={editMode}
+            dragHandleProps={handleProps}
+          >
+            <div className="flex items-center gap-3 py-1">
+              <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-900/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">Sexual Health Records</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">PIN protected · Tap to unlock</p>
+              </div>
+            </div>
+          </Tile>
+        )
+      }
+
       default:
         return null
     }
   }
 
-  // Tiles visible in current mode
-  const visibleTiles = tileOrder.filter(id =>
-    editMode || !isFarmMode || FARM_TILE_WHITELIST.has(id)
-  )
+  // Tiles visible in current mode (by mode/permission filter)
+  const visibleTiles = tileOrder.filter(id => {
+    if (id === 'private_health' && !shQuickAccess && !editMode) return false
+    return editMode || !isFarmMode || FARM_TILE_WHITELIST.has(id)
+  })
 
-  // Tiles that always span the full grid width (they look best full-width)
+  // Tiles that always occupy the full row width
   const WIDE_TILES = new Set<TileId>(['news', 'sponsored'])
+
+  // Pre-determine which of the visible tiles will actually render non-null content.
+  // Some tiles (e.g. 'farm' in personal mode) pass the mode filter above but return
+  // null from renderTile — if we let them into the grid they create invisible empty
+  // cells that push their neighbours into the wrong column.
+  function willRender(id: TileId): boolean {
+    if (editMode) return true   // edit mode always shows all tiles
+    switch (id) {
+      case 'vaccines':   return !isFarmMode
+      case 'news':       return !!visibleNews
+      case 'dependents': return !isFarmMode
+      case 'pets':       return !isFarmMode && pets.length > 0
+      case 'farm':       return isFarmMode
+      case 'sponsored':  return !!visibleSponsored
+      case 'passport':   return !isFarmMode
+      case 'validation': return isFarmMode || pendingCount > 0
+      default:           return true
+    }
+  }
+
+  // Only include tiles that will actually render content
+  const renderableTiles = visibleTiles.filter(willRender)
+
+  // Compute the CSS col-span class for each tile:
+  //   • Wide tiles → always 'md:col-span-2'
+  //   • Two adjacent narrow tiles → each gets '' (one column each)
+  //   • A lone narrow tile (last in list, or next tile is wide) → 'md:col-span-2'
+  //     so it expands to fill the row instead of leaving a gap
+  const tileColSpans = new Map<TileId, string>()
+  {
+    let i = 0
+    while (i < renderableTiles.length) {
+      const id = renderableTiles[i]
+      if (WIDE_TILES.has(id)) {
+        tileColSpans.set(id, 'md:col-span-2')
+        i++
+      } else {
+        const nextId = renderableTiles[i + 1]
+        if (nextId && !WIDE_TILES.has(nextId)) {
+          // Two narrow tiles pair up — each takes one column
+          tileColSpans.set(id, '')
+          tileColSpans.set(nextId, '')
+          i += 2
+        } else {
+          // Lone narrow tile — expand to fill the row
+          tileColSpans.set(id, 'md:col-span-2')
+          i++
+        }
+      }
+    }
+  }
 
   return (
     <div className="relative h-screen lg:h-full bg-[#F2F2F7] dark:bg-black overflow-hidden">
@@ -781,18 +861,14 @@ export function HomePage() {
           <SortableContext items={tileOrder} strategy={verticalListSortingStrategy}>
             {/* Responsive grid: 1 col mobile → 2 col md+ → constrained max-width */}
             <div className="px-4 pt-3 pb-40 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3 auto-rows-min">
-              {visibleTiles.map(id => (
+              {renderableTiles.map(id => (
                 <SortableTile
                   key={id}
                   id={id}
                   editMode={editMode}
-                  wideOnDesktop={WIDE_TILES.has(id)}
+                  colSpan={tileColSpans.get(id) ?? ''}
                 >
-                  {(handleProps) => {
-                    const content = renderTile(id, handleProps)
-                    if (!content) return <></>
-                    return content
-                  }}
+                  {(handleProps) => renderTile(id, handleProps) ?? <></>}
                 </SortableTile>
               ))}
             </div>
