@@ -3,11 +3,12 @@ import { getClinics, addClinic, updateClinic, deleteClinic, bulkUpsertClinicsByI
 import { downloadClinicCSV, parseClinicCSV } from '../utils/clinicsCsv'
 import type { ClinicParseResult } from '../utils/clinicsCsv'
 import type { Clinic, ClinicType } from '../types/admin'
-import { CLINIC_TYPE_LABELS, CLINIC_TYPE_COLOURS } from '../types/admin'
+import { CLINIC_TYPE_COLOURS } from '../types/admin'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Spinner } from '../components/ui/Spinner'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 
 const EMPTY_FORM = { name: '', address: '', city: '', country: '', phone: '', website: '', clinicType: 'human' as ClinicType, verified: false }
 
@@ -489,14 +490,13 @@ export function AdminClinicsPage() {
   if (isLg) {
     return (
       <>
-        <div className="flex flex-1 overflow-hidden border-t border-gray-200 dark:border-gray-700">
-          <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">
-            {listPanel}
-          </div>
-          <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-            {detailPanel}
-          </div>
-        </div>
+        <ResizableSplitPane
+          storageKey="splitPane:adminClinics"
+          leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+          rightClassName="bg-gray-50 dark:bg-gray-900"
+          left={listPanel}
+          right={detailPanel}
+        />
         {importModal && (
           <ImportModal
             filename={importModal.filename}

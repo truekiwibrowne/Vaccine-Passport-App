@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -52,11 +53,11 @@ const AdminIcon = () => (
 interface NavItem {
   to: string
   label: string
-  icon: React.ReactNode
+  icon: ReactNode
   exact?: boolean
 }
 
-export function SideNav() {
+export function SideNav({ width = 240 }: { width?: number }) {
   const { profile, user } = useAuth()
   const { isDark } = useTheme()
   const navigate = useNavigate()
@@ -93,7 +94,10 @@ export function SideNav() {
     : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
 
   return (
-    <aside className={`hidden lg:flex flex-col w-56 h-screen border-r flex-shrink-0 ${bg}`}>
+    <aside
+      style={{ width }}
+      className={`hidden lg:flex flex-col h-screen border-r flex-shrink-0 overflow-hidden ${bg}`}
+    >
       {/* Logo / App name */}
       <div className="px-5 pt-7 pb-5">
         <div className="flex items-center gap-2.5">
@@ -129,6 +133,27 @@ export function SideNav() {
           </NavLink>
         ))}
       </nav>
+
+      {/* Private health — always visible for personal-mode users; PIN gate protects the page */}
+      {!isFarmMode && (
+        <div className="px-3 pb-1">
+          <NavLink
+            to="/health/sexual"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400'
+                  : 'text-violet-500 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'
+              }`
+            }
+          >
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            Private Health
+          </NavLink>
+        </div>
+      )}
 
       {/* Admin link */}
       {profile?.Admin && (
