@@ -41,6 +41,7 @@ export async function addUserVaccine(uid: string, data: Omit<UserVaccine, 'user_
     authentication_level: data.authentication_level,
     Authentication_Date: data.Authentication_Date,
     Expiration_date: data.Expiration_date,
+    ...(data.isEntryRequirement ? { isEntryRequirement: true } : {}),
   }
   batch.set(doc(publicVaccinesRef(uid), newRef.id), pubRecord)
 

@@ -1,13 +1,161 @@
 import { useRef, useState } from 'react'
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react'
-import { buildVerifyUrl } from '../../utils/qrPayload'
+import { buildVerifyUrl, APP_PUBLIC_URL } from '../../utils/qrPayload'
 import { Button } from '../ui/Button'
+import jsPDF from 'jspdf'
+import type { PHRPassportSummary } from '../../types/user'
 
 interface Props {
   uid: string
   firstName: string
   vaccineCount: number
   verifiedCount: number
+  phrSummary?: PHRPassportSummary   // optional — only shown if user has enabled it
+}
+
+// ── PDF passport export ──────────────────────────────────────────────────────
+
+async function exportPassportPdf(
+  uid: string,
+  firstName: string,
+  vaccineCount: number,
+  verifiedCount: number,
+  qrCanvas: HTMLCanvasElement,
+  phrSummary?: PHRPassportSummary,
+) {
+  const url  = buildVerifyUrl(uid)
+  const now  = new Date()
+  const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  // A5 landscape (148 × 210 mm)
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a5' })
+  const W = 210, H = 148
+
+  // ── Background ──────────────────────────────────────────────────────────
+  pdf.setFillColor(30, 58, 138)   // blue-900
+  pdf.roundedRect(0, 0, W, H, 0, 0, 'F')
+
+  // ── Decorative circles ──────────────────────────────────────────────────
+  pdf.setFillColor(255, 255, 255)
+  pdf.setGState(pdf.GState({ opacity: 0.04 }))
+  pdf.circle(W * 0.82, -15, 55, 'F')
+  pdf.circle(W * 0.88, H * 0.85, 40, 'F')
+  pdf.setGState(pdf.GState({ opacity: 1 }))
+
+  // ── Left panel text ─────────────────────────────────────────────────────
+  const lx = 14
+
+  // Label
+  pdf.setTextColor(147, 197, 253)  // blue-300
+  pdf.setFontSize(8)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('VACCINE PASSPORT', lx, 22)
+
+  // Name
+  pdf.setTextColor(255, 255, 255)
+  pdf.setFontSize(firstName.length > 14 ? 26 : 32)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(firstName, lx, 50)
+
+  // Vaccine stats
+  pdf.setFontSize(11)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setTextColor(200, 220, 255)
+  pdf.text(`${verifiedCount} of ${vaccineCount} vaccines verified`, lx, 63)
+
+  // Verified badge
+  if (verifiedCount > 0) {
+    pdf.setFillColor(255, 255, 255)
+    pdf.setGState(pdf.GState({ opacity: 0.15 }))
+    pdf.roundedRect(lx, 68, 45, 9, 4, 4, 'F')
+    pdf.setGState(pdf.GState({ opacity: 1 }))
+    pdf.setTextColor(255, 255, 255)
+    pdf.setFontSize(8)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('✓  Verified', lx + 4, 74.5)
+  }
+
+  // PHR section (if enabled)
+  let phrBlockBottom = 80
+  if (phrSummary) {
+    const phrY = 82
+    pdf.setFillColor(255, 255, 255)
+    pdf.setGState(pdf.GState({ opacity: 0.12 }))
+    pdf.roundedRect(lx, phrY, 108, 28, 3, 3, 'F')
+    pdf.setGState(pdf.GState({ opacity: 1 }))
+
+    // Section label
+    pdf.setTextColor(147, 197, 253)
+    pdf.setFontSize(6.5)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('PRIVATE HEALTH', lx + 4, phrY + 7)
+
+    // Status
+    const phrStatus = phrSummary.isClear && !phrSummary.isOnTreatment
+      ? 'Clear'
+      : phrSummary.isOnTreatment ? 'Receiving Treatment' : 'Results on File'
+    pdf.setTextColor(255, 255, 255)
+    pdf.setFontSize(9)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(phrStatus, lx + 4, phrY + 16)
+
+    // Last tested
+    const tested = new Date(phrSummary.lastTestedDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    pdf.setFontSize(6.5)
+    pdf.setFont('helvetica', 'normal')
+    pdf.setTextColor(200, 220, 255)
+    pdf.text(`Last tested: ${tested}`, lx + 4, phrY + 23)
+
+    phrBlockBottom = phrY + 32
+  }
+
+  // Divider
+  pdf.setDrawColor(255, 255, 255)
+  pdf.setGState(pdf.GState({ opacity: 0.12 }))
+  pdf.line(lx, phrBlockBottom + 2, lx + 80, phrBlockBottom + 2)
+  pdf.setGState(pdf.GState({ opacity: 1 }))
+
+  // Generated date
+  pdf.setTextColor(147, 197, 253)
+  pdf.setFontSize(7.5)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text(`Generated ${date}`, lx, phrBlockBottom + 10)
+
+  // URL
+  pdf.setTextColor(147, 197, 253)
+  pdf.setFontSize(7)
+  const urlDisplay = APP_PUBLIC_URL.replace(/^https?:\/\//, '')
+  pdf.text(urlDisplay, lx, H - 10)
+
+  // ── QR code panel (right side) ──────────────────────────────────────────
+  const QR_SIZE = 68
+  const qrX = W - QR_SIZE - 18
+  const qrY = H / 2 - QR_SIZE / 2 - 4
+
+  // "Scan to verify" label above QR
+  pdf.setTextColor(255, 255, 255)
+  pdf.setGState(pdf.GState({ opacity: 0.6 }))
+  pdf.setFontSize(7.5)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Scan to verify', qrX + QR_SIZE / 2, qrY - 4, { align: 'center' })
+  pdf.setGState(pdf.GState({ opacity: 1 }))
+
+  // White QR background
+  pdf.setFillColor(255, 255, 255)
+  pdf.roundedRect(qrX, qrY, QR_SIZE, QR_SIZE, 4, 4, 'F')
+
+  // Draw QR image from canvas
+  const qrDataUrl = qrCanvas.toDataURL('image/png')
+  const pad = 3
+  pdf.addImage(qrDataUrl, 'PNG', qrX + pad, qrY + pad, QR_SIZE - pad * 2, QR_SIZE - pad * 2)
+
+  // App name under QR
+  pdf.setTextColor(147, 197, 253)
+  pdf.setFontSize(7)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('VaxPass', qrX + QR_SIZE / 2, qrY + QR_SIZE + 6, { align: 'center' })
+
+  pdf.save(`vaxpass-${firstName.toLowerCase()}.pdf`)
 }
 
 // ── Canvas helper: rounded rect (compat with older Safari) ──────────────────
@@ -21,10 +169,11 @@ function rrect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
   ctx.closePath()
 }
 
-export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: Props) {
+export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount, phrSummary }: Props) {
   const url = buildVerifyUrl(uid)
   const hiddenQrRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
   const [walletInfo, setWalletInfo] = useState<null | 'apple' | 'google'>(null)
 
   // ── Share link ──────────────────────────────────────────────────────────
@@ -53,8 +202,9 @@ export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: P
         img.src = qrDataUrl
       })
 
-      // Card dimensions (2× for retina)
-      const W = 750, H = 430
+      // Card dimensions — expand height when PHR block is present (2× for retina)
+      const W = 750
+      const H = phrSummary ? 530 : 430
       const canvas = document.createElement('canvas')
       canvas.width = W; canvas.height = H
       const ctx = canvas.getContext('2d')!
@@ -70,7 +220,7 @@ export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: P
       // ── Decorative circle (top-right) ──
       ctx.fillStyle = 'rgba(255,255,255,0.06)'
       ctx.beginPath(); ctx.arc(W * 0.85, -30, 200, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(W * 0.9, H * 0.7, 140, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.arc(W * 0.9, H * 0.8, 140, 0, Math.PI * 2); ctx.fill()
 
       // ── "VACCINE PASSPORT" label ──
       ctx.fillStyle = 'rgba(147,197,253,0.9)'  // blue-300
@@ -90,21 +240,59 @@ export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: P
       // ── Verified badge pill ──
       if (verifiedCount > 0) {
         ctx.fillStyle = 'rgba(255,255,255,0.15)'
-        rrect(ctx, 48, 218, 154, 38, 19)
+        rrect(ctx, 48, 210, 154, 38, 19)
         ctx.fill()
         ctx.fillStyle = '#ffffff'
         ctx.font = '600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-        ctx.fillText('✓  Verified', 68, 242)
+        ctx.fillText('✓  Verified', 68, 234)
+      }
+
+      // ── PHR block (only when enabled) ──
+      let dividerY = 278
+      if (phrSummary) {
+        const phrTop = 268
+        const phrH = 96
+
+        // Frosted box
+        ctx.fillStyle = 'rgba(255,255,255,0.12)'
+        rrect(ctx, 48, phrTop, 390, phrH, 14)
+        ctx.fill()
+
+        // Section label
+        ctx.fillStyle = 'rgba(147,197,253,0.9)'
+        ctx.font = '600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        ctx.fillText('PRIVATE HEALTH', 68, phrTop + 26)
+
+        // Status
+        const phrStatus = phrSummary.isClear && !phrSummary.isOnTreatment
+          ? 'Clear'
+          : phrSummary.isOnTreatment
+            ? 'Receiving Treatment'
+            : 'Results on File'
+        ctx.fillStyle = '#ffffff'
+        ctx.font = `bold ${phrStatus.length > 12 ? 20 : 24}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+        ctx.fillText(phrStatus, 68, phrTop + 58)
+
+        // Last tested date
+        const tested = new Date(phrSummary.lastTestedDate).toLocaleDateString('en-GB', {
+          day: 'numeric', month: 'short', year: 'numeric',
+        })
+        ctx.fillStyle = 'rgba(200,220,255,0.85)'
+        ctx.font = '400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+        ctx.fillText(`Last tested: ${tested}`, 68, phrTop + 82)
+
+        dividerY = phrTop + phrH + 14
       }
 
       // ── Divider ──
       ctx.fillStyle = 'rgba(255,255,255,0.12)'
-      ctx.fillRect(48, 278, 260, 1)
+      ctx.fillRect(48, dividerY, 260, 1)
 
       // ── Bottom URL ──
+      const urlDisplay = APP_PUBLIC_URL.replace(/^https?:\/\//, '')
       ctx.fillStyle = 'rgba(147,197,253,0.85)'
       ctx.font = '400 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-      ctx.fillText('vaxpass-app.netlify.app', 48, H - 36)
+      ctx.fillText(urlDisplay, 48, H - 36)
 
       // ── "Scan to verify" label (above QR) ──
       const QR = 200, qrX = W - QR - 40, qrY = H / 2 - QR / 2 - 10
@@ -137,6 +325,21 @@ export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: P
       alert('Could not generate card. Please try again.')
     } finally {
       setDownloading(false)
+    }
+  }
+
+  // ── PDF export ──────────────────────────────────────────────────────────
+  async function downloadPdf() {
+    setExportingPdf(true)
+    try {
+      const qrCanvas = hiddenQrRef.current?.querySelector('canvas') as HTMLCanvasElement | null
+      if (!qrCanvas) { alert('QR code not ready. Please try again.'); return }
+      await exportPassportPdf(uid, firstName, vaccineCount, verifiedCount, qrCanvas, phrSummary)
+    } catch (err) {
+      console.error('PDF export error:', err)
+      alert('Could not generate PDF. Please try again.')
+    } finally {
+      setExportingPdf(false)
     }
   }
 
@@ -202,13 +405,21 @@ export function QRCodeDisplay({ uid, firstName, vaccineCount, verifiedCount }: P
         {/* ── Action buttons ── */}
         <div className="flex flex-col gap-2 w-full">
 
-          {/* Download Card */}
-          <Button variant="secondary" fullWidth loading={downloading} onClick={downloadCard}>
-            <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Download Card
-          </Button>
+          {/* Download row: PNG card + PDF */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="secondary" fullWidth loading={downloading} onClick={downloadCard}>
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              PNG Card
+            </Button>
+            <Button variant="secondary" fullWidth loading={exportingPdf} onClick={downloadPdf}>
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              PDF
+            </Button>
+          </div>
 
           {/* Wallet row */}
           <div className="grid grid-cols-2 gap-2">

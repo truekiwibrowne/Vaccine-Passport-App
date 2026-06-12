@@ -1,12 +1,21 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useUserVaccines } from '../hooks/useUserVaccines'
-import { toggleFavourite } from '../services/vaccineService'
+import { toggleFavourite, deleteUserVaccine } from '../services/vaccineService'
+import { createValidationRequest } from '../services/validationService'
+import { getPractitionerByEmail } from '../services/practitionersService'
+import type { Practitioner } from '../types/admin'
+import { VERIFICATION_LEVEL_LABELS, VERIFICATION_LEVEL_COLOURS } from '../types/admin'
 import { QRCodeDisplay } from '../components/passport/QRCodeDisplay'
+import { VaccineStatusPill } from '../components/vaccine/VaccineStatusPill'
+import { Modal } from '../components/ui/Modal'
+import { Input } from '../components/ui/Input'
+import { Button } from '../components/ui/Button'
 import { formatDate, isExpired } from '../utils/dateUtils'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 import type { UserVaccine } from '../types/vaccine'
 
 type Filter = 'all' | 'verified' | 'pending' | 'starred'
@@ -52,18 +61,88 @@ function computeAge(dob?: string): number | null {
 // ── Inline detail panel (desktop right column) ─────────────────────────────────
 function VaccineDetailPanel({
   vaccine,
+  uid,
   onNavigate,
   onFav,
   favOverride,
+  onDeleted,
 }: {
   vaccine: UserVaccine
+  uid: string
   onNavigate: () => void
   onFav: () => void
   favOverride?: boolean
+  onDeleted: () => void
 }) {
-  const { text, badge, colour } = statusInfo(vaccine)
-  const expired = isExpired(vaccine.Expiration_date)
-  const fav = favOverride ?? vaccine.Favourited
+  const { profile } = useAuth()
+  const navigate = useNavigate()
+  const expired  = isExpired(vaccine.Expiration_date)
+  const canEdit  = vaccine.Authenticated !== true && !expired
+  const fav      = favOverride ?? vaccine.Favourited
+
+  const [deleting,        setDeleting]        = useState(false)
+  const [validationModal, setValidationModal] = useState(false)
+  const [validatorEmail,  setValidatorEmail]  = useState('')
+  const [submitting,      setSubmitting]      = useState(false)
+  const [chainOpen,       setChainOpen]       = useState(false)
+  const [chain,           setChain]           = useState<Practitioner[]>([])
+  const [chainLoading,    setChainLoading]    = useState(false)
+
+  // Reset chain when vaccine changes
+  useEffect(() => { setChainOpen(false); setChain([]) }, [vaccine.user_vaccine_id])
+
+  async function loadChain() {
+    if (!vaccine.Authenticator) return
+    setChainLoading(true)
+    const result: Practitioner[] = []
+    let email: string | null = vaccine.Authenticator
+    const seen = new Set<string>()
+    while (email && !seen.has(email) && result.length < 5) {
+      seen.add(email)
+      const p = await getPractitionerByEmail(email)
+      if (!p) break
+      result.push(p)
+      email = p.verifiedBy || null
+    }
+    setChain(result)
+    setChainLoading(false)
+  }
+  useEffect(() => { if (chainOpen) loadChain() }, [chainOpen])
+
+  async function handleDelete() {
+    if (!confirm('Delete this vaccine record?')) return
+    setDeleting(true)
+    try {
+      await deleteUserVaccine(uid, vaccine.user_vaccine_id)
+      onDeleted()
+    } catch {
+      alert('Error deleting.')
+      setDeleting(false)
+    }
+  }
+
+  async function requestValidation() {
+    if (!validatorEmail) return
+    setSubmitting(true)
+    try {
+      await createValidationRequest({
+        user_vaccine_id: vaccine.user_vaccine_id,
+        user_id:         uid,
+        vaccine_name:    vaccine.vaccine_name,
+        requested_at:    new Date().toISOString(),
+        requestor_email: profile?.Email ?? '',
+        validator_email: validatorEmail,
+      })
+      setValidationModal(false)
+      setValidatorEmail('')
+      alert('Validation request sent!')
+    } catch (e) {
+      console.error(e)
+      alert('Error sending request.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const Field = ({ label, value }: { label: string; value?: string | null }) =>
     value ? (
@@ -74,8 +153,9 @@ function VaccineDetailPanel({
     ) : null
 
   return (
-    <div className="p-6 flex flex-col gap-5">
-      {/* Title row */}
+    <div className="p-6 flex flex-col gap-5 pb-16">
+
+      {/* ── Title row ── */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white leading-tight">
@@ -85,68 +165,201 @@ function VaccineDetailPanel({
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">{vaccine.Vaccine_Reference}</p>
           )}
         </div>
-        <button onClick={onFav} className="p-1.5 flex-shrink-0 mt-0.5">
-          <svg
-            className={`w-5 h-5 ${fav ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200 dark:text-gray-700'}`}
-            stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-          </svg>
-        </button>
+        {/* Icon actions — matches mobile VaccineDetailPage header */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {canEdit && (
+            <button onClick={onNavigate} className="p-2 text-blue-500" title="Edit record">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          <button onClick={handleDelete} disabled={deleting} className="p-2 text-red-400 disabled:opacity-50" title="Delete record">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+          <button onClick={onFav} className="p-2" title="Toggle favourite">
+            <svg
+              className={`w-5 h-5 ${fav ? 'text-yellow-400 fill-yellow-400' : 'text-gray-200 dark:text-gray-700'}`}
+              stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+            </svg>
+          </button>
+        </div>
       </div>
 
-      {/* Status badge */}
+      {/* ── Status ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className={`text-sm px-3 py-1 rounded-full font-semibold ${badge}`}>
-          {text.split(' ·')[0]}
-        </span>
-        {vaccine.authentication_level > 0 && (
-          <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">
-            Trust level {vaccine.authentication_level}
-          </span>
-        )}
+        <VaccineStatusPill
+          authenticated={vaccine.Authenticated}
+          pending={vaccine.pending_validation}
+          level={vaccine.authentication_level}
+        />
         {expired && (
           <span className="text-xs bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 px-2 py-0.5 rounded-full font-medium">
             Expired
           </span>
         )}
+        {vaccine.Authenticated === true && (
+          <span className="text-xs text-gray-400 dark:text-gray-500">Cannot be edited after verification</span>
+        )}
       </div>
 
-      {/* Fields */}
+      {/* ── Fields ── */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl px-4 divide-y divide-gray-50 dark:divide-gray-700/50">
         <Field label="Date Administered" value={vaccine.date_administration ? formatDate(vaccine.date_administration) : null} />
-        <Field label="Clinic / Hospital" value={vaccine.Clinic || null} />
-        <Field label={colour === 'green' ? 'Verified by' : 'Requested validator'} value={vaccine.Authenticator ?? (vaccine.validator_email || null)} />
-        {vaccine.Authentication_Date && (
-          <Field label="Verified on" value={formatDate(vaccine.Authentication_Date)} />
-        )}
-        <Field label="Expiry Date" value={vaccine.Expiration_date ? formatDate(vaccine.Expiration_date) : null} />
+        <Field label="Clinic / Hospital"  value={vaccine.Clinic || null} />
+        <Field label="Doctor / Nurse"     value={vaccine.Doctor || null} />
+        <Field label={vaccine.Authenticated ? 'Verified by' : 'Requested validator'} value={vaccine.Authenticator ?? (vaccine.validator_email || null)} />
+        {vaccine.Authentication_Date && <Field label="Verified on" value={formatDate(vaccine.Authentication_Date)} />}
+        <Field label="Expiry Date"  value={vaccine.Expiration_date ? formatDate(vaccine.Expiration_date) : null} />
+        <Field label="Batch / Lot"  value={(vaccine as any).batch_number || null} />
       </div>
 
-      {/* Photo evidence */}
+      {/* ── Verification chain (authenticated only) ── */}
+      {vaccine.Authenticated === true && (
+        <div>
+          <button
+            onClick={() => setChainOpen(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">Verification Chain</span>
+              <span className="text-xs bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
+                Level {vaccine.authentication_level}
+              </span>
+            </div>
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${chainOpen ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {chainOpen && (
+            <div className="mt-2 space-y-3">
+              {chainLoading && <p className="text-xs text-gray-400 text-center py-4">Loading chain…</p>}
+              {!chainLoading && chain.length === 0 && (
+                <p className="text-xs text-gray-400 px-4 py-2">
+                  Verified by {vaccine.Authenticator} — not yet registered as a practitioner.
+                </p>
+              )}
+              {chain.map((p, i) => (
+                <div key={p.id} className="rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+                  <div className="px-4 py-3 bg-white dark:bg-gray-800">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{p.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{p.email}</p>
+                        {p.clinicName && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{p.clinicName}</p>}
+                        {p.speciality && <p className="text-xs text-gray-400 dark:text-gray-500">{p.speciality}</p>}
+                      </div>
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${VERIFICATION_LEVEL_COLOURS[p.verificationLevel]}`}>
+                        L{p.verificationLevel} · {VERIFICATION_LEVEL_LABELS[p.verificationLevel]}
+                      </span>
+                    </div>
+                    {i === 0 && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                        Verified on {formatDate(vaccine.Authentication_Date)}
+                      </p>
+                    )}
+                    {i > 0 && p.verifiedAt && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                        Verified by {chain[i - 1]?.name ?? '—'} on {formatDate(p.verifiedAt)}
+                      </p>
+                    )}
+                  </div>
+                  {p.verifiedBy && i === chain.length - 1 && !chainLoading && (
+                    <div className="px-4 py-2 bg-gray-50 dark:bg-gray-700/40">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Chain root: verified by <span className="font-medium">{p.verifiedBy}</span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Photo evidence ── */}
       {vaccine.Photo_Evidence && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden">
           <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-4 pt-3 pb-2">
             Photo Evidence
           </p>
-          <img
-            src={vaccine.Photo_Evidence}
-            alt="Vaccine evidence"
-            className="w-full max-h-48 object-cover"
-          />
+          <img src={vaccine.Photo_Evidence} alt="Vaccine evidence" className="w-full max-h-56 object-cover" />
         </div>
       )}
 
-      {/* Actions */}
-      <button
-        onClick={onNavigate}
-        className="w-full py-3 rounded-2xl bg-blue-600 text-white font-semibold text-sm active:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-        </svg>
-        View / Edit Full Record
-      </button>
+      {/* ── Notes ── */}
+      {vaccine.Notes && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-4">
+          <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">Notes</p>
+          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{vaccine.Notes}</p>
+        </div>
+      )}
+
+      {/* ── Library link ── */}
+      {vaccine.vaccine_id && (
+        <button
+          onClick={() => navigate(`/library/${vaccine.vaccine_id}`)}
+          className="w-full bg-blue-50 dark:bg-blue-900/30 rounded-2xl px-4 py-3.5 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Read about this vaccine</span>
+          </div>
+          <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      )}
+
+      {/* ── Validation ── */}
+      {!vaccine.Authenticated && !vaccine.pending_validation && (
+        <Button size="lg" fullWidth onClick={() => setValidationModal(true)}>
+          Request Medical Validation
+        </Button>
+      )}
+      {vaccine.pending_validation && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-2xl p-4 text-center border border-yellow-100 dark:border-yellow-800">
+          <p className="text-sm font-medium text-yellow-700 dark:text-yellow-300">
+            ⏳ Awaiting review by {vaccine.validator_email}
+          </p>
+          <p className="text-xs text-yellow-500 dark:text-yellow-400 mt-1">
+            Ask them to sign in to the app and check their Validation Inbox
+          </p>
+        </div>
+      )}
+
+      {/* ── Validation modal ── */}
+      <Modal open={validationModal} onClose={() => setValidationModal(false)} title="Request Medical Validation">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+          Enter the email address of the medical professional who administered or can verify this vaccine.
+        </p>
+        <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 rounded-lg p-2 mb-4">
+          They'll need to sign in to this app with that email address to see and approve your request in their Validation Inbox.
+        </p>
+        <Input
+          label="Validator's email address"
+          type="email"
+          value={validatorEmail}
+          onChange={e => setValidatorEmail(e.target.value)}
+          placeholder="doctor@clinic.com"
+        />
+        <div className="mt-4 flex gap-3">
+          <Button variant="secondary" fullWidth onClick={() => setValidationModal(false)}>Cancel</Button>
+          <Button fullWidth loading={submitting} onClick={requestValidation} disabled={!validatorEmail}>
+            Send Request
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -403,9 +616,11 @@ export function MyVaccinesPage() {
       <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
         {header}
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left panel — list */}
-          <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800/50">
+        <ResizableSplitPane
+          storageKey="splitPane:myVaccines"
+          leftClassName="overflow-y-auto bg-white dark:bg-gray-800/50"
+          rightClassName="bg-gray-50 dark:bg-gray-900"
+          left={
             <div className="p-4 flex flex-col gap-3">
               {userInfoCard}
               <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1">
@@ -413,22 +628,18 @@ export function MyVaccinesPage() {
               </p>
               {filterTabs}
               {vaccineList}
-
-              {/* QR passport — below the list */}
-              <div className="mt-2">
-                {qrCard}
-              </div>
+              <div className="mt-2">{qrCard}</div>
             </div>
-          </div>
-
-          {/* Right panel — detail */}
-          <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-            {selectedVaccine ? (
+          }
+          right={
+            selectedVaccine ? (
               <VaccineDetailPanel
                 vaccine={selectedVaccine}
+                uid={user!.uid}
                 onNavigate={() => navigate(`/vaccines/${selectedVaccine.user_vaccine_id}`)}
                 onFav={() => handleFav(selectedVaccine)}
                 favOverride={favOverrides[selectedVaccine.user_vaccine_id]}
+                onDeleted={() => setSelectedId(null)}
               />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center px-8">
@@ -442,9 +653,9 @@ export function MyVaccinesPage() {
                   Click any vaccine from the list to view its details here
                 </p>
               </div>
-            )}
-          </div>
-        </div>
+            )
+          }
+        />
       </div>
     )
   }

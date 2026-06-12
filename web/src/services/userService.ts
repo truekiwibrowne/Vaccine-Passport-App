@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, writeBatch } from 'firebase/firestore'
+import { doc, getDoc, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { UserProfile, PublicProfile } from '../types/user'
 import { isoNow } from '../utils/dateUtils'
@@ -48,15 +48,31 @@ export async function updateUserProfile(uid: string, data: Partial<UserProfile>)
   await setDoc(doc(db, 'User_Data', uid), { ...data, Updated: isoNow() }, { merge: true })
 
   // Keep the public sharing profile in sync when name/email/photo changes
-  if (data.Full_Name || data.Email || data.Profile_Image) {
+  if (data.Full_Name || data.Email || data.Profile_Image || data.Passport_Number !== undefined) {
     const full = await getUserProfile(uid)
     if (full) {
+      // Sync UserPublicProfiles (share invite lookups)
       await upsertPublicProfile({
         uid,
         displayName: full.Full_Name,
         email:       full.Email.toLowerCase(),
         photoURL:    full.Profile_Image ?? undefined,
       }).catch(() => { /* non-critical */ })
+
+      // Sync Public_Profile/summary (QR scan page)
+      const pubUpdates: Partial<PublicProfile> = {}
+      if (data.Full_Name !== undefined) {
+        pubUpdates.firstName = full.Full_Name.split(' ')[0] || 'User'
+        pubUpdates.fullName  = full.Full_Name
+      }
+      if (data.Profile_Image !== undefined)  pubUpdates.photoURL       = full.Profile_Image || undefined
+      if (data.Passport_Number !== undefined) pubUpdates.passportNumber = full.Passport_Number || undefined
+      if (Object.keys(pubUpdates).length > 0) {
+        await updateDoc(
+          doc(db, 'User_Data', uid, 'Public_Profile', 'summary'),
+          pubUpdates,
+        ).catch(() => { /* non-critical */ })
+      }
     }
   }
 }
@@ -93,9 +109,14 @@ export async function completeOnboarding(uid: string, data: Partial<UserProfile>
     { merge: true }
   )
 
-  // Write public profile — first name only, readable without auth for QR verify
-  const pubProfile: PublicProfile = { firstName }
-  batch.set(doc(db, 'User_Data', uid, 'Public_Profile', 'summary'), pubProfile)
+  // Write public profile — name, passport number, and photo readable without auth for QR verify
+  const pubProfile: PublicProfile = {
+    firstName,
+    fullName:       data.Full_Name ?? undefined,
+    passportNumber: data.Passport_Number || undefined,
+    photoURL:       data.Profile_Image   || undefined,
+  }
+  batch.set(doc(db, 'User_Data', uid, 'Public_Profile', 'summary'), pubProfile, { merge: true })
 
   // Index passport number for uniqueness checks (if provided)
   if (data.Passport_Number) {

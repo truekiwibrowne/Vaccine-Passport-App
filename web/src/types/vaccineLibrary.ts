@@ -91,5 +91,17 @@ export interface VaccineLibraryEntry {
    * Stored as a comma-separated list to support multi-species vaccines.
    */
   animalTypes?: string
+  /**
+   * Countries that require proof of this vaccination for entry (visa / border control).
+   * Comma-separated country names, e.g. "Kenya, Ghana, Brazil".
+   * Displayed prominently on the library detail page and used to flag vaccines
+   * as priority items on the public QR verify page.
+   */
+  entryRequirementCountries?: string
+  /**
+   * Optional clarifying note for the entry requirement, e.g.
+   * "Required only if arriving from or transiting through an endemic country."
+   */
+  entryRequirementNote?: string
   relevanceScore?: number  // computed client-side, never stored
 }

@@ -119,13 +119,13 @@ export function AddFarmAnimalPage() {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 pt-safe py-3">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-1.5 -ml-1.5">
+          <button onClick={() => navigate(-1)} className="p-2 -ml-2">
             <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           <div>
-            <h1 className="font-bold text-gray-900 dark:text-white text-sm uppercase tracking-wide">Add Animal Record</h1>
+            <h1 className="text-base font-semibold text-gray-900 dark:text-white">Add Animal Record</h1>
             <p className="text-xs text-gray-400 dark:text-gray-500">New livestock registration</p>
           </div>
         </div>

@@ -14,7 +14,7 @@ import type { PetVaccine } from '../types/pet'
 import type { Clinic, Practitioner } from '../types/admin'
 
 export function PetVaccineDetailPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const { isDark } = useTheme()
   const navigate = useNavigate()
   const { petId, vaccineId } = useParams<{ petId: string; vaccineId: string }>()
@@ -122,7 +122,7 @@ export function PetVaccineDetailPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="flex-1 font-semibold text-gray-900 dark:text-white text-base truncate">
+          <h1 className="flex-1 text-lg font-semibold text-gray-900 dark:text-white truncate">
             {vaccine?.vaccine_name ?? 'Vaccine'}
           </h1>
           {!editing && vaccine && (
@@ -155,6 +155,7 @@ export function PetVaccineDetailPage() {
               clinics={clinics}
               label="Veterinary Clinic"
               placeholder="Search registered vet clinics or type a name…"
+              userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
             />
             <PractitionerCombobox
               value={form.Doctor}

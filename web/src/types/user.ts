@@ -25,4 +25,19 @@ export interface UserProfile {
 
 export interface PublicProfile {
   firstName: string
+  fullName?: string
+  passportNumber?: string          // shown on scan page for identity verification
+  photoURL?: string                // profile photo URL or base64
+  phrSummary?: PHRPassportSummary  // present only if user has enabled "Include in Passport QR"
+}
+
+/**
+ * Sanitised Private Health summary for the public scan page.
+ * Contains NO condition names — only the aggregate status.
+ */
+export interface PHRPassportSummary {
+  lastTestedDate: string    // ISO — most recent test date across all records
+  isClear: boolean          // all effective results are negative/immune (curable past positives don't count)
+  isOnTreatment: boolean    // at least one record is on_treatment or undetectable
+  updatedAt: string         // ISO — when this summary was last published
 }

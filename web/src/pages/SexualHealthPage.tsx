@@ -13,7 +13,7 @@ import {
   publishPHRToPassport, removePHRFromPassport,
 } from '../services/sexualHealthService'
 import {
-  requestPHRAccess, listenForPHRApproval, deletePHRRequest, phrRequestSecondsRemaining,
+  requestPHRAccess, listenForPHRApproval, deletePHRRequest,
 } from '../services/phrAuthService'
 import type { SexualHealthRecord, SexualHealthConfig } from '../types/sexualHealth'
 import { SH_CONDITION_LABELS, SH_RESULT_LABELS, SH_RESULT_COLOURS, SH_CURABILITY, SH_CURABILITY_LABELS, SH_CURABILITY_COLOURS } from '../types/sexualHealth'

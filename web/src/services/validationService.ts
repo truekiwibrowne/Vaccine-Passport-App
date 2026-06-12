@@ -51,26 +51,41 @@ export async function approveValidation(
   const authLevel = Math.min(practitionerLevel + 1, 5)
 
   const batch = writeBatch(db)
-  const vaccinesRef = doc(db, 'User_Data', request.user_id, 'Vaccines', request.user_vaccine_id)
-  const pubVaccineRef = doc(db, 'User_Data', request.user_id, 'Public_Vaccines', request.user_vaccine_id)
   const reqRef = doc(db, 'Validation_Requests', request.request_id)
 
-  // Use set+merge so these work even if the public doc doesn't exist yet
-  // (e.g. vaccine was added before the dual-write was implemented).
-  batch.set(reqRef, { status: 'approved', responded_at: now, validator_notes: notes, authentication_level: authLevel }, { merge: true })
-  batch.set(vaccinesRef, {
-    Authenticated: true,
-    Authentication_Date: now,
-    authentication_level: authLevel,
-    Authenticator: request.validator_email,
-    pending_validation: false,
-    Updated: now,
+  batch.set(reqRef, {
+    status: 'approved', responded_at: now, validator_notes: notes, authentication_level: authLevel,
   }, { merge: true })
-  batch.set(pubVaccineRef, {
-    Authenticated: true,
-    Authentication_Date: now,
-    authentication_level: authLevel,
-  }, { merge: true })
+
+  if (request.record_type === 'sexual_health') {
+    // Update the SexualHealth subcollection record
+    const shRef = doc(db, 'User_Data', request.user_id, 'SexualHealth', request.user_vaccine_id)
+    batch.set(shRef, {
+      Authenticated: true,
+      Authentication_Date: now,
+      authentication_level: authLevel,
+      Authenticator: request.validator_email,
+      pending_validation: false,
+      Updated: now,
+    }, { merge: true })
+  } else {
+    // Update the Vaccines subcollection record + its public mirror
+    const vaccinesRef   = doc(db, 'User_Data', request.user_id, 'Vaccines', request.user_vaccine_id)
+    const pubVaccineRef = doc(db, 'User_Data', request.user_id, 'Public_Vaccines', request.user_vaccine_id)
+    batch.set(vaccinesRef, {
+      Authenticated: true,
+      Authentication_Date: now,
+      authentication_level: authLevel,
+      Authenticator: request.validator_email,
+      pending_validation: false,
+      Updated: now,
+    }, { merge: true })
+    batch.set(pubVaccineRef, {
+      Authenticated: true,
+      Authentication_Date: now,
+      authentication_level: authLevel,
+    }, { merge: true })
+  }
 
   await batch.commit()
   return { authLevel }
@@ -83,11 +98,20 @@ export async function rejectValidation(request: ValidationRequest, notes: string
   batch.update(doc(db, 'Validation_Requests', request.request_id), {
     status: 'rejected', responded_at: now, validator_notes: notes,
   })
-  batch.update(doc(db, 'User_Data', request.user_id, 'Vaccines', request.user_vaccine_id), {
-    Authenticated: false,
-    pending_validation: false,
-    Updated: now,
-  })
+
+  if (request.record_type === 'sexual_health') {
+    batch.update(doc(db, 'User_Data', request.user_id, 'SexualHealth', request.user_vaccine_id), {
+      Authenticated: false,
+      pending_validation: false,
+      Updated: now,
+    })
+  } else {
+    batch.update(doc(db, 'User_Data', request.user_id, 'Vaccines', request.user_vaccine_id), {
+      Authenticated: false,
+      pending_validation: false,
+      Updated: now,
+    })
+  }
 
   await batch.commit()
 }

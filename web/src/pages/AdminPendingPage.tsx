@@ -29,7 +29,6 @@ import { updateDependentVaccine } from '../services/dependentsService'
 import { updatePetVaccine } from '../services/petsService'
 import { updateFarmVaccine } from '../services/farmService'
 import type { PendingClinic, PendingPractitioner, PendingVaccine, VaccineContext } from '../types/pendingSubmissions'
-import type { VaccineCategory } from '../types/vaccineLibrary'
 import { VACCINE_CATEGORY_LABELS } from '../types/vaccineLibrary'
 import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 import { formatDate, isoNow } from '../utils/dateUtils'
@@ -128,10 +127,6 @@ export function AdminPendingPage() {
     }
     setEditFields(base)
     setEditMode(true)
-  }
-
-  function ef(key: string, fallback = '') {
-    return editMode ? (editFields[key] ?? fallback) : fallback
   }
 
   // ── Update an EXISTING vaccine record's Clinic or Doctor field ─────────────
@@ -285,7 +280,6 @@ export function AdminPendingPage() {
     const city    = editMode ? (editFields.city    || item.city)    : item.city
     const country = editMode ? (editFields.country || item.country) : item.country
     const website = editMode ? editFields.website : (item.website ?? '')
-    const notes   = editMode ? editFields.notes   : (item.notes   ?? '')
     try {
       await addClinic({ name, phone, address, city, country, website, clinicType: 'human', verified: false })
       await approvePendingClinic(item.id, profile.Email ?? 'admin')

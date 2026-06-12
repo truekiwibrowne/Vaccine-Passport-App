@@ -34,12 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       let p = await getUserProfile(u.uid)
       if (!p) {
-        // First sign-in — create stub profile from Google/Apple account data
+        // First sign-in — create stub profile from Google/Apple account data.
+        // Profile_Image is intentionally NOT populated from the provider photo URL:
+        // the user may control multiple Google accounts with the same photo, which
+        // would make a new account look like it had inherited data from another.
+        // The user sets their own photo explicitly during onboarding (or later in
+        // Profile → Settings).
         await createUserProfile(u.uid, {
           Full_Name: u.displayName ?? '',
           Email: u.email ?? '',
           Username: u.email?.split('@')[0] ?? '',
-          Profile_Image: u.photoURL ?? '',
+          Profile_Image: '',
         })
         p = await getUserProfile(u.uid)
       }

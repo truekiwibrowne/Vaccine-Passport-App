@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { getAllVaccineLibraryEntries, addVaccineLibraryEntry, updateVaccineLibraryEntry, bulkUpsertVaccineLibraryEntries } from '../services/vaccineLibraryService'
+import { getDiseaseRisk, setDiseaseRisk, deleteDiseaseRisk } from '../services/diseaseRiskService'
 import { downloadLibraryCSV, parseLibraryCSV, type ParseResult } from '../utils/vaccineLibraryCsv'
 import type { VaccineLibraryEntry, VaccineCategory, AnimalVaccineType } from '../types/vaccineLibrary'
 import {
@@ -12,6 +13,7 @@ import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 import { GeoTagInput } from '../components/ui/GeoTagInput'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 
 type FormData = Omit<VaccineLibraryEntry, 'id' | 'relevanceScore'>
 
@@ -22,6 +24,7 @@ const EMPTY_FORM: FormData = {
   'Age Group': '', 'Target Population': '', 'Geographic Priority': '',
   'Disease Prevalence': '', 'Special Notes': '', status: 'available',
   category: 'human_adult', animalTypes: '',
+  entryRequirementCountries: '', entryRequirementNote: '',
 }
 
 const TEXT_FIELDS: { key: keyof FormData; label: string; multiline?: boolean }[] = [
@@ -203,6 +206,15 @@ export function AdminLibraryPage() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
+  // Risk map editor state (per-entry, loaded when an entry is opened)
+  const [riskHigh,       setRiskHigh]       = useState('')   // comma-separated country names
+  const [riskMedium,     setRiskMedium]     = useState('')
+  const [riskNote,       setRiskNote]       = useState('')
+  const [riskLoading,    setRiskLoading]    = useState(false)
+  const [riskSaving,     setRiskSaving]     = useState(false)
+  const [riskSavedMsg,   setRiskSavedMsg]   = useState('')
+  const [showRiskEditor, setShowRiskEditor] = useState(false)
+
   // CSV import/export
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [importModal, setImportModal] = useState<{ filename: string; result: ParseResult } | null>(null)
@@ -228,9 +240,28 @@ export function AdminLibraryPage() {
     const { id, relevanceScore, ...rest } = entry
     void id; void relevanceScore
     setForm({ ...EMPTY_FORM, ...rest } as FormData)
+    // Load existing risk map data for this entry
+    setRiskHigh(''); setRiskMedium(''); setRiskNote('')
+    setRiskSavedMsg(''); setShowRiskEditor(false)
+    setRiskLoading(true)
+    getDiseaseRisk(entry.id)
+      .then(doc => {
+        if (doc) {
+          setRiskHigh(doc.high.join(', '))
+          setRiskMedium(doc.medium.join(', '))
+          setRiskNote(doc.note ?? '')
+          setShowRiskEditor(true)  // auto-expand if data exists
+        }
+      })
+      .catch(() => {/* non-critical */})
+      .finally(() => setRiskLoading(false))
   }
 
-  function closeDetail() { setSelectedId(null); setIsNew(false) }
+  function closeDetail() {
+    setSelectedId(null); setIsNew(false)
+    setRiskHigh(''); setRiskMedium(''); setRiskNote('')
+    setRiskSavedMsg(''); setShowRiskEditor(false)
+  }
 
   async function save() {
     if (!form.Vac_Name?.trim() || !form['Disease Target']?.trim()) {
@@ -251,6 +282,37 @@ export function AdminLibraryPage() {
       console.error('Library save error:', e)
       alert('Error saving. Make sure your Admin flag is set to boolean true in Firestore.')
     } finally { setSaving(false) }
+  }
+
+  async function saveRiskMap() {
+    if (!selectedId) return
+    setRiskSaving(true); setRiskSavedMsg('')
+    try {
+      const parseTags = (s: string) => s.split(',').map(t => t.trim()).filter(Boolean)
+      await setDiseaseRisk(selectedId, {
+        diseaseTarget: form['Disease Target'] ?? '',
+        high:   parseTags(riskHigh),
+        medium: parseTags(riskMedium),
+        note:   riskNote.trim(),
+      })
+      setRiskSavedMsg('Saved!')
+      setTimeout(() => setRiskSavedMsg(''), 3000)
+    } catch {
+      alert('Error saving risk data. Check admin permissions.')
+    } finally { setRiskSaving(false) }
+  }
+
+  async function clearRiskMap() {
+    if (!selectedId) return
+    if (!window.confirm('Remove all risk map data for this vaccine? The static fallback data (if any) will be used instead.')) return
+    try {
+      await deleteDiseaseRisk(selectedId)
+      setRiskHigh(''); setRiskMedium(''); setRiskNote('')
+      setRiskSavedMsg('Risk map cleared')
+      setTimeout(() => setRiskSavedMsg(''), 3000)
+    } catch {
+      alert('Error clearing risk data.')
+    }
   }
 
   function handleExportCSV() {
@@ -523,6 +585,123 @@ export function AdminLibraryPage() {
           placeholder="Search regions where disease is prevalent…"
         />
 
+        {/* ── Entry Requirements ──────────────────────────────────────────── */}
+        <div className="border border-amber-200 dark:border-amber-700/50 rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 flex items-center gap-2 border-b border-amber-100 dark:border-amber-700/40">
+            <span className="text-base">🛂</span>
+            <div>
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Entry Requirements</p>
+              <p className="text-xs text-amber-600 dark:text-amber-400">Countries that require proof of this vaccination for entry / visa</p>
+            </div>
+          </div>
+          <div className="px-4 py-4 flex flex-col gap-3">
+            <GeoTagInput
+              label="Required-for-Entry Countries"
+              value={form.entryRequirementCountries ?? ''}
+              onChange={v => setForm(f => ({ ...f, entryRequirementCountries: v }))}
+              placeholder="Search and add countries that require this vaccine…"
+            />
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+                Clarifying Note (optional)
+              </label>
+              <textarea
+                value={form.entryRequirementNote ?? ''}
+                onChange={e => setForm(f => ({ ...f, entryRequirementNote: e.target.value }))}
+                rows={2}
+                placeholder='e.g. "Required only if arriving from or transiting through an endemic country."'
+                className={inputCls + ' resize-none'}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Risk Map Editor ──────────────────────────────────────────────── */}
+        {!isNew && (
+          <div className="border border-gray-200 dark:border-gray-600 rounded-2xl overflow-hidden">
+            {/* Header / toggle */}
+            <button
+              type="button"
+              onClick={() => setShowRiskEditor(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
+                </svg>
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Risk Map Data</span>
+                {riskLoading && <span className="text-xs text-gray-400">Loading…</span>}
+                {!riskLoading && (riskHigh || riskMedium) && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Saved</span>
+                )}
+              </div>
+              <svg
+                className={`w-4 h-4 text-gray-400 transition-transform ${showRiskEditor ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showRiskEditor && (
+              <div className="px-4 py-4 flex flex-col gap-4 border-t border-gray-100 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                  Define which countries show as High (red) or Moderate (amber) risk on the public-facing
+                  disease map. These settings override the built-in static data. Leave blank to use
+                  static defaults.
+                </p>
+
+                <GeoTagInput
+                  label="🔴 High Risk Countries"
+                  value={riskHigh}
+                  onChange={setRiskHigh}
+                  placeholder="Add country where vaccination is required / endemic…"
+                />
+                <GeoTagInput
+                  label="🟡 Moderate Risk Countries"
+                  value={riskMedium}
+                  onChange={setRiskMedium}
+                  placeholder="Add country where vaccination is recommended…"
+                />
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+                    Contextual Note (shown in blue callout below map)
+                  </label>
+                  <textarea
+                    value={riskNote}
+                    onChange={e => setRiskNote(e.target.value)}
+                    rows={2}
+                    placeholder="e.g. 'No licensed vaccine exists for this disease.' or 'Disease was eradicated in 1980.'"
+                    className={inputCls + ' resize-none'}
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={saveRiskMap}
+                    disabled={riskSaving}
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {riskSaving ? 'Saving…' : 'Save Risk Map'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearRiskMap}
+                    className="px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {riskSavedMsg && (
+                  <p className="text-xs text-green-600 dark:text-green-400 font-medium">{riskSavedMsg}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Market status */}
         <div>
           <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">Market Status</label>
@@ -570,14 +749,13 @@ export function AdminLibraryPage() {
   if (isLg) {
     return (
       <>
-        <div className="flex flex-1 overflow-hidden border-t border-gray-200 dark:border-gray-700">
-          <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">
-            {listPanel}
-          </div>
-          <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-            {detailPanel}
-          </div>
-        </div>
+        <ResizableSplitPane
+          storageKey="splitPane:adminLibrary"
+          leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+          rightClassName="bg-gray-50 dark:bg-gray-900"
+          left={listPanel}
+          right={detailPanel}
+        />
         {importModal && (
           <ImportModal
             filename={importModal.filename}

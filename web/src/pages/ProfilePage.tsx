@@ -16,12 +16,14 @@ import { CountryPicker } from '../components/ui/CountryPicker'
 import { useNavigate } from 'react-router-dom'
 import { HEALTH_CONDITION_LABELS, type HealthCondition } from '../utils/contraindications'
 import { usePushNotifications } from '../hooks/usePushNotifications'
+import { useUnreadNotifications } from '../hooks/useUnreadNotifications'
 
 export function ProfilePage() {
   const { isDark, toggleTheme } = useTheme()
   const { user, profile, signOut, refreshProfile } = useAuth()
   const navigate = useNavigate()
   const { permissionState, tokenState, errorMessage, requestPermission } = usePushNotifications(user?.uid)
+  const unreadCount = useUnreadNotifications(user?.uid)
   const [editing, setEditing] = useState(false)
   const [savingHealth, setSavingHealth] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -489,6 +491,19 @@ export function ProfilePage() {
 
           {/* Actions */}
           <div className="mt-2 flex flex-col gap-1">
+            <Button variant="ghost" fullWidth onClick={() => navigate('/health/sexual')} className="justify-start text-violet-700 dark:text-violet-400">
+              🔒 Private Health Records
+            </Button>
+            <Button variant="ghost" fullWidth onClick={() => navigate('/notifications')} className="justify-start">
+              <span className="flex items-center gap-2 w-full">
+                <span>🔔 Notifications</span>
+                {unreadCount > 0 && (
+                  <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                    {unreadCount}
+                  </span>
+                )}
+              </span>
+            </Button>
             <Button variant="ghost" fullWidth onClick={() => navigate('/validate')} className="justify-start">
               Validation Inbox
             </Button>

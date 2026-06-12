@@ -819,9 +819,9 @@ export function CalendarPage() {
         <div className="h-14 flex items-center px-4 gap-2">
           <button
             onClick={() => navigate(-1)}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
+            className="p-2 -ml-2 flex-shrink-0"
           >
-            <IconChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <IconChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           </button>
 
           <h1 className="flex-1 text-lg font-semibold text-gray-900 dark:text-white truncate">

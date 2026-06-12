@@ -1,4 +1,6 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../../contexts/AuthContext'
+import { useUnreadNotifications } from '../../hooks/useUnreadNotifications'
 
 const tabs = [
   { to: '/', label: 'Home', icon: (active: boolean) => (
@@ -24,6 +26,9 @@ const tabs = [
 ]
 
 export function BottomNav() {
+  const { user } = useAuth()
+  const unreadCount = useUnreadNotifications(user?.uid)
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-600 z-50 pb-safe">
       <div className="flex justify-around items-center h-16 max-w-lg mx-auto px-2">
@@ -36,7 +41,17 @@ export function BottomNav() {
           >
             {({ isActive }) => (
               <>
-                {tab.icon(isActive)}
+                {/* Profile icon gets an unread badge dot */}
+                {tab.to === '/profile' ? (
+                  <span className="relative inline-flex">
+                    {tab.icon(isActive)}
+                    {unreadCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-yellow-400 border-2 border-white dark:border-gray-800" />
+                    )}
+                  </span>
+                ) : (
+                  tab.icon(isActive)
+                )}
                 <span className={`text-xs font-medium ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
                   {tab.label}
                 </span>

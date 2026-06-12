@@ -5,12 +5,23 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 
 export function LoginPage() {
-  const { signInWithGoogle, signInWithApple, sendMagicLink, completeMagicLinkSignIn } = useAuth()
+  const {
+    user, loading: authLoading,
+    signInWithGoogle, signInWithApple, sendMagicLink, completeMagicLinkSignIn,
+  } = useAuth()
   const navigate = useNavigate()
   const [loading, setLoading] = useState<'google' | 'apple' | 'link' | 'completing' | null>(null)
   const [error, setError] = useState('')
   const [email, setEmail] = useState('')
   const [linkSent, setLinkSent] = useState(false)
+
+  // Navigate away once Firebase auth + profile loading is fully complete.
+  // This replaces the inline navigate('/') calls that raced with onAuthStateChanged.
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate('/', { replace: true })
+    }
+  }, [user, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: check if this page load is a magic-link redirect
   useEffect(() => {
@@ -18,10 +29,10 @@ export function LoginPage() {
       setLoading('completing')
       try {
         const done = await completeMagicLinkSignIn()
-        if (done) navigate('/')
+        // Navigation is handled by the authLoading/user effect above
+        if (!done) setLoading(null)
       } catch (e: unknown) {
         setError((e as Error).message)
-      } finally {
         setLoading(null)
       }
     }
@@ -30,16 +41,27 @@ export function LoginPage() {
 
   async function handleGoogle() {
     setLoading('google'); setError('')
-    try { await signInWithGoogle(); navigate('/') }
-    catch (e: unknown) { setError((e as Error).message) }
-    finally { setLoading(null) }
+    try {
+      await signInWithGoogle()
+      // Don't navigate here — the authLoading/user effect above handles it
+      // once onAuthStateChanged fires and loadProfile completes.
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(null)
+    }
   }
 
   async function handleApple() {
     setLoading('apple'); setError('')
-    try { await signInWithApple(); navigate('/') }
-    catch (e: unknown) { setError((e as Error).message) }
-    finally { setLoading(null) }
+    try {
+      await signInWithApple()
+      // Same — navigation deferred to authLoading/user effect
+    } catch (e: unknown) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(null)
+    }
   }
 
   async function handleMagicLink() {

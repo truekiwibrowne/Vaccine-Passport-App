@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,10 +18,12 @@
     "firebase-admin": "^13.10.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "prop-types": "^15.8.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.15.1",
+    "react-simple-maps": "^3.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

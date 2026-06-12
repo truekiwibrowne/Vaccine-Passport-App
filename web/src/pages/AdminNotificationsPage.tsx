@@ -9,6 +9,7 @@ import {
   getFCMTokenCount,
 } from '../services/notificationsAdminService'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function statusBadge(status: NotificationStatus) {
@@ -409,14 +410,13 @@ export function AdminNotificationsPage() {
   // ── Layout ─────────────────────────────────────────────────────────────────
   if (isLg) {
     return (
-      <div className="flex flex-1 overflow-hidden border-t border-gray-200 dark:border-gray-700">
-        <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-800">
-          {listPanel}
-        </div>
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-          {detailPanel}
-        </div>
-      </div>
+      <ResizableSplitPane
+        storageKey="splitPane:adminNotifications"
+        leftClassName="overflow-y-auto bg-white dark:bg-gray-800"
+        rightClassName="bg-gray-50 dark:bg-gray-900"
+        left={listPanel}
+        right={detailPanel}
+      />
     )
   }
 

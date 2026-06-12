@@ -44,6 +44,7 @@ export function VaccineDetailPage() {
     Clinic: '',
     Doctor: '',
     Expiration_date: '',
+    Notes: '',
   })
   const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null)
 
@@ -66,6 +67,7 @@ export function VaccineDetailPage() {
       Expiration_date: vaccine.Expiration_date
         ? new Date(vaccine.Expiration_date).toISOString().split('T')[0]
         : '',
+      Notes: vaccine.Notes ?? '',
     })
     setEditing(true)
   }
@@ -87,6 +89,7 @@ export function VaccineDetailPage() {
           ? new Date(editForm.Expiration_date).toISOString()
           : null,
         Photo_Evidence: photoUrl,
+        Notes: editForm.Notes || undefined,
         Updated: isoNow(),
       })
       setEditing(false)
@@ -176,13 +179,13 @@ export function VaccineDetailPage() {
           background: isDark ? 'rgba(15,15,15,0.50)' : 'rgba(242,242,247,0.50)',
         }}
       >
-        <div className="flex items-center justify-between h-14 max-w-lg mx-auto">
+        <div className="flex items-center justify-between h-14">
           <button onClick={() => editing ? setEditing(false) : navigate(-1)} className="p-2 -ml-2">
             <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="font-semibold text-gray-900 dark:text-white">{editing ? 'Edit Record' : 'Vaccine Record'}</h1>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{editing ? 'Edit Record' : 'Vaccine Record'}</h1>
           {!editing ? (
             <div className="flex items-center gap-1">
               {canEdit && (
@@ -332,6 +335,14 @@ export function VaccineDetailPage() {
               </div>
             )}
 
+            {/* Notes */}
+            {vaccine.Notes && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
+                <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">Notes</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{vaccine.Notes}</p>
+              </div>
+            )}
+
             {/* About this vaccine → library */}
             {vaccine.vaccine_id && (
               <button
@@ -387,6 +398,7 @@ export function VaccineDetailPage() {
                 value={editForm.Clinic}
                 onChange={v => setEditForm(f => ({ ...f, Clinic: v }))}
                 clinics={clinics}
+                userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
               />
               <PractitionerCombobox
                 value={editForm.Doctor}
@@ -408,6 +420,16 @@ export function VaccineDetailPage() {
                 value={editForm.Expiration_date}
                 onChange={e => setEditForm(f => ({ ...f, Expiration_date: e.target.value }))}
               />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
+                <textarea
+                  value={editForm.Notes}
+                  onChange={e => setEditForm(f => ({ ...f, Notes: e.target.value }))}
+                  placeholder="Any observations, reactions, or details worth recording…"
+                  rows={3}
+                  className="w-full px-3.5 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
               <div>
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Replace photo evidence</p>
                 <label className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl cursor-pointer">

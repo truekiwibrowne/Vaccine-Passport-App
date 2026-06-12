@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Modal } from '../components/ui/Modal'
 import { Button } from '../components/ui/Button'
 import { getAllAnimalVaccines, addAnimalVaccine, updateAnimalVaccine, deleteAnimalVaccine } from '../services/animalVaccineLibraryService'
+import { getDiseaseRisk, setDiseaseRisk, deleteDiseaseRisk } from '../services/diseaseRiskService'
+import { GeoTagInput } from '../components/ui/GeoTagInput'
 import type { AnimalVaccineEntry } from '../types/animalVaccine'
 import type { PetSpecies } from '../types/pet'
 import { PET_SPECIES_LABELS, PET_SPECIES_EMOJI } from '../types/pet'
@@ -39,6 +41,14 @@ export function AdminAnimalLibraryPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ ...emptyForm })
 
+  // Risk map editor
+  const [riskHigh,     setRiskHigh]     = useState('')
+  const [riskMedium,   setRiskMedium]   = useState('')
+  const [riskNote,     setRiskNote]     = useState('')
+  const [riskSaving,   setRiskSaving]   = useState(false)
+  const [riskSavedMsg, setRiskSavedMsg] = useState('')
+  const [showRisk,     setShowRisk]     = useState(false)
+
   useEffect(() => {
     getAllAnimalVaccines()
       .then(setEntries)
@@ -55,9 +65,15 @@ export function AdminAnimalLibraryPage() {
     )
   })
 
+  function resetRisk() {
+    setRiskHigh(''); setRiskMedium(''); setRiskNote('')
+    setRiskSavedMsg(''); setShowRisk(false)
+  }
+
   function openNew() {
     setEditing(null)
     setForm({ ...emptyForm })
+    resetRisk()
     setModalOpen(true)
   }
 
@@ -75,12 +91,49 @@ export function AdminAnimalLibraryPage() {
       Notes: entry.Notes ?? '',
       status: entry.status ?? 'available',
     })
+    resetRisk()
+    // Load existing risk data
+    getDiseaseRisk(entry.id)
+      .then(doc => {
+        if (doc) {
+          setRiskHigh(doc.high.join(', '))
+          setRiskMedium(doc.medium.join(', '))
+          setRiskNote(doc.note ?? '')
+          setShowRisk(true)
+        }
+      })
+      .catch(() => {})
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
     setEditing(null)
+    resetRisk()
+  }
+
+  async function saveRiskMap() {
+    if (!editing) return
+    setRiskSaving(true); setRiskSavedMsg('')
+    try {
+      const parseTags = (s: string) => s.split(',').map(t => t.trim()).filter(Boolean)
+      await setDiseaseRisk(editing.id, {
+        diseaseTarget: form.Disease_Target,
+        high:   parseTags(riskHigh),
+        medium: parseTags(riskMedium),
+        note:   riskNote.trim(),
+      })
+      setRiskSavedMsg('Saved!')
+      setTimeout(() => setRiskSavedMsg(''), 3000)
+    } catch { alert('Error saving risk data.') }
+    finally { setRiskSaving(false) }
+  }
+
+  async function clearRiskMap() {
+    if (!editing) return
+    if (!window.confirm('Remove all risk map data for this entry?')) return
+    await deleteDiseaseRisk(editing.id).catch(() => {})
+    resetRisk()
   }
 
   function toggleSpecies(sp: string) {
@@ -323,6 +376,78 @@ export function AdminAnimalLibraryPage() {
               className="w-full px-3.5 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+
+          {/* ── Risk Map ── only shown when editing an existing entry */}
+          {editing && (
+            <div className="border border-gray-200 dark:border-gray-600 rounded-2xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowRisk(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
+                  </svg>
+                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Risk Map Data</span>
+                  {(riskHigh || riskMedium) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Saved</span>
+                  )}
+                </div>
+                <svg className={`w-4 h-4 text-gray-400 transition-transform ${showRisk ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showRisk && (
+                <div className="px-4 py-4 flex flex-col gap-3 border-t border-gray-100 dark:border-gray-700">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Set which countries appear as high or moderate risk on the map shown in the vaccine detail page.
+                  </p>
+                  <GeoTagInput
+                    label="🔴 High Risk Countries"
+                    value={riskHigh}
+                    onChange={setRiskHigh}
+                    placeholder="Add country where vaccination is required / endemic…"
+                  />
+                  <GeoTagInput
+                    label="🟡 Moderate Risk Countries"
+                    value={riskMedium}
+                    onChange={setRiskMedium}
+                    placeholder="Add country where vaccination is recommended…"
+                  />
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">Contextual Note</label>
+                    <textarea
+                      value={riskNote}
+                      onChange={e => setRiskNote(e.target.value)}
+                      rows={2}
+                      placeholder="Optional note shown below the map…"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={saveRiskMap}
+                      disabled={riskSaving}
+                      className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {riskSaving ? 'Saving…' : 'Save Risk Map'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearRiskMap}
+                      className="px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    >Clear</button>
+                  </div>
+                  {riskSavedMsg && (
+                    <p className="text-xs text-green-600 dark:text-green-400 font-medium">{riskSavedMsg}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">Status</label>

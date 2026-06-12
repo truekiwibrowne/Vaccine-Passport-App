@@ -1,18 +1,26 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminClinicsPage } from './AdminClinicsPage'
 import { AdminPractitionersPage } from './AdminPractitionersPage'
 import { AdminLibraryPage } from './AdminLibraryPage'
 import { AdminNotificationsPage } from './AdminNotificationsPage'
 import { AdminFeedPage } from './AdminFeedPage'
+import { AdminPendingPage } from './AdminPendingPage'
+import { AdminSTILibraryPage } from './AdminSTILibraryPage'
+import { getPendingCounts } from '../services/pendingSubmissionsService'
 
-type AdminTab = 'clinics' | 'practitioners' | 'library' | 'notifications' | 'feed'
+type AdminTab = 'clinics' | 'practitioners' | 'library' | 'notifications' | 'feed' | 'pending' | 'sti_library'
 
 export function AdminPage() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<AdminTab>('clinics')
+  const [pendingCount, setPendingCount] = useState(0)
 
-  const tabs: { key: AdminTab; label: string; icon: React.ReactNode }[] = [
+  useEffect(() => {
+    getPendingCounts().then(c => setPendingCount(c.total)).catch(() => {})
+  }, [tab]) // re-check when switching tabs so count stays fresh
+
+  const tabs: { key: AdminTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     {
       key: 'clinics',
       label: 'Clinics',
@@ -58,6 +66,25 @@ export function AdminPage() {
         </svg>
       ),
     },
+    {
+      key: 'pending',
+      label: 'Pending',
+      badge: pendingCount,
+      icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+    {
+      key: 'sti_library',
+      label: 'STI Library',
+      icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
+        </svg>
+      ),
+    },
   ]
 
   return (
@@ -90,6 +117,11 @@ export function AdminPage() {
             >
               {t.icon}
               {t.label}
+              {(t.badge ?? 0) > 0 && (
+                <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -102,6 +134,8 @@ export function AdminPage() {
         {tab === 'library' && <AdminLibraryPage />}
         {tab === 'notifications' && <AdminNotificationsPage />}
         {tab === 'feed' && <AdminFeedPage />}
+        {tab === 'pending' && <AdminPendingPage />}
+        {tab === 'sti_library' && <AdminSTILibraryPage />}
       </div>
     </div>
   )

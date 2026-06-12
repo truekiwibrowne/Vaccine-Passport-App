@@ -20,7 +20,7 @@ function statusInfo(v: UserVaccine) {
 }
 
 export function DependentVaccineDetailPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const { isDark } = useTheme()
   const navigate = useNavigate()
   const { depId, vaccineId } = useParams<{ depId: string; vaccineId: string }>()
@@ -31,7 +31,7 @@ export function DependentVaccineDetailPage() {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const [form, setForm] = useState({ date_administration: '', Clinic: '', Doctor: '', Expiration_date: '' })
+  const [form, setForm] = useState({ date_administration: '', Clinic: '', Doctor: '', Expiration_date: '', Notes: '' })
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [practitioners, setPractitioners] = useState<Practitioner[]>([])
 
@@ -50,6 +50,7 @@ export function DependentVaccineDetailPage() {
         Clinic: v.Clinic ?? '',
         Doctor: v.Doctor ?? '',
         Expiration_date: v.Expiration_date ? new Date(v.Expiration_date).toISOString().split('T')[0] : '',
+        Notes: v.Notes ?? '',
       })
     }).finally(() => setLoading(false))
   }, [user, depId, vaccineId])
@@ -67,6 +68,7 @@ export function DependentVaccineDetailPage() {
         Clinic: form.Clinic,
         Doctor: form.Doctor,
         Expiration_date: form.Expiration_date ? new Date(form.Expiration_date).toISOString() : null,
+        Notes: form.Notes || undefined,
       }
       await updateDependentVaccine(user.uid, depId, vaccineId, payload)
       setVaccine(prev => prev ? { ...prev, ...payload } : prev)
@@ -106,6 +108,8 @@ export function DependentVaccineDetailPage() {
     vaccine.authentication_level > 0 ? { label: 'Auth Level', value: `Level ${vaccine.authentication_level}` } : null,
   ].filter(Boolean) as { label: string; value: string }[] : []
 
+  const hasNotes = vaccine?.Notes && vaccine.Notes.trim().length > 0
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div
@@ -122,7 +126,7 @@ export function DependentVaccineDetailPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="flex-1 font-semibold text-gray-900 dark:text-white text-base truncate">
+          <h1 className="flex-1 text-lg font-semibold text-gray-900 dark:text-white truncate">
             {vaccine?.vaccine_name ?? 'Vaccine'}
           </h1>
           {status && <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.colour}`}>{status.text}</span>}
@@ -149,6 +153,7 @@ export function DependentVaccineDetailPage() {
               value={form.Clinic}
               onChange={v => update('Clinic', v)}
               clinics={clinics}
+              userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
             />
             <PractitionerCombobox
               value={form.Doctor}
@@ -162,6 +167,16 @@ export function DependentVaccineDetailPage() {
               preferClinic={form.Clinic}
             />
             <Input label="Expiry date (optional)" type="date" value={form.Expiration_date} onChange={e => update('Expiration_date', e.target.value)} />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
+              <textarea
+                value={form.Notes}
+                onChange={e => update('Notes', e.target.value)}
+                placeholder="Any observations, reactions, or details worth recording…"
+                rows={3}
+                className="w-full px-3.5 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
             <Button size="lg" fullWidth loading={saving} onClick={saveEdit}>Save Changes</Button>
             <button onClick={() => setEditing(false)} className="text-sm text-gray-400 text-center py-2">Cancel</button>
           </div>
@@ -180,6 +195,12 @@ export function DependentVaccineDetailPage() {
                 </div>
               ))}
             </div>
+            {hasNotes && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm mb-4">
+                <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">Notes</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{vaccine!.Notes}</p>
+              </div>
+            )}
             {canEdit && (
               <button onClick={handleDelete} disabled={deleting}
                 className="w-full py-3 rounded-xl text-red-500 text-sm font-semibold bg-red-50 dark:bg-red-900/20 active:opacity-70 transition-opacity">

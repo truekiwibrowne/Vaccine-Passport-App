@@ -7,7 +7,7 @@
  *   Amber  (#d97706) — Moderate risk: vaccination recommended for some travellers / areas
  *   Gray              — Low / no known risk for this disease
  */
-import { useState, memo, useEffect } from 'react'
+import React, { useState, memo, useEffect } from 'react'
 import { ComposableMap, Geographies, Geography } from 'react-simple-maps'
 import { getRiskForDisease, getCountryRisk } from '../../utils/diseaseRiskData'
 import type { DiseaseRisk } from '../../utils/diseaseRiskData'
@@ -148,8 +148,8 @@ export const DiseaseRiskMap = memo(function DiseaseRiskMap({ entry, entryId }: P
           height={240}
         >
           <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map(geo => {
+            {({ geographies }: { geographies: any[] }) =>
+              geographies.map((geo: any) => {
                 const name = geo.properties.name as string
                 const risk = getCountryRisk(name, riskData!)
                 const fill =
@@ -164,7 +164,7 @@ export const DiseaseRiskMap = memo(function DiseaseRiskMap({ entry, entryId }: P
                     fill={fill}
                     stroke={stroke}
                     strokeWidth={0.4}
-                    onMouseEnter={e => {
+                    onMouseEnter={(e: React.MouseEvent) => {
                       const rect = (e.target as SVGElement)
                         .closest('svg')
                         ?.getBoundingClientRect()

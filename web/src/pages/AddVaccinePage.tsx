@@ -14,10 +14,11 @@ import { Input } from '../components/ui/Input'
 import { Button } from '../components/ui/Button'
 import { ClinicCombobox } from '../components/ui/ClinicCombobox'
 import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
+import { VaccineRequestModal } from '../components/ui/VaccineRequestModal'
 
 // ── Main page ────────────────────────────────────────────────────────────────
 export function AddVaccinePage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -31,12 +32,14 @@ export function AddVaccinePage() {
   const [selected, setSelected] = useState<VaccineLibraryEntry | null>(preselected)
   const [saving, setSaving] = useState(false)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [showVaccineRequest, setShowVaccineRequest] = useState(false)
 
   const [form, setForm] = useState({
     date_administration: new Date().toISOString().split('T')[0],
     Clinic: '',
     Doctor: '',
     Expiration_date: '',
+    Notes: '',
     validator_email: '',   // required for trial/premarket vaccines
   })
 
@@ -60,6 +63,39 @@ export function AddVaccinePage() {
   function update(f: string, v: string) { setForm(prev => ({ ...prev, [f]: v })) }
 
   const isRestricted = selected?.status === 'trial' || selected?.status === 'premarket'
+
+  /** Called by Clinic/Practitioner comboboxes when the user submits a pending
+   *  request.  Saves the vaccine record first so the approve handler can find
+   *  it and fill in the Clinic/Doctor field rather than creating a duplicate. */
+  async function saveForPendingRequest(): Promise<string | null> {
+    if (!user || !selected) return null
+    try {
+      return await addUserVaccine(user.uid, {
+        user_id:             user.uid,
+        vaccine_id:          selected.id,
+        vaccine_name:        selected.Vac_Name,
+        Vaccine_Reference:   selected['Brand Name'] ?? selected.Vac_Name,
+        date_administration: new Date(form.date_administration).toISOString(),
+        Clinic:              form.Clinic,
+        Doctor:              form.Doctor,
+        Photo_Evidence:      '',
+        Supporting_files:    [],
+        Expiration_date:     form.Expiration_date ? new Date(form.Expiration_date).toISOString() : null,
+        Authenticated:       null,
+        Authentication_Date: null,
+        authentication_level: 0,
+        Authenticator:       null,
+        Favourited:          false,
+        pending_validation:  false,
+        validator_email:     '',
+        Notes:               form.Notes || undefined,
+        isEntryRequirement:  !!selected.entryRequirementCountries?.trim(),
+      })
+    } catch (err) {
+      console.error('saveForPendingRequest failed:', err)
+      return null
+    }
+  }
 
   async function save() {
     if (!user || !selected) return
@@ -93,6 +129,8 @@ export function AddVaccinePage() {
         Favourited: false,
         pending_validation: isRestricted,
         validator_email: isRestricted ? form.validator_email.trim().toLowerCase() : '',
+        Notes: form.Notes || undefined,
+        isEntryRequirement: !!selected.entryRequirementCountries?.trim(),
       })
 
       // For trial/premarket, automatically create the validation request
@@ -131,7 +169,7 @@ export function AddVaccinePage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="font-semibold text-gray-900 dark:text-white">
+        <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
           {step === 'search' ? 'Select Vaccine' : 'Add Details'}
         </h1>
       </div>
@@ -174,13 +212,35 @@ export function AddVaccinePage() {
               </button>
             ))}
             {results.length === 0 && searchQ && (
-              <p className="text-center text-gray-400 dark:text-gray-500 text-sm mt-8">No vaccines found for "{searchQ}"</p>
+              <div className="text-center mt-8">
+                <p className="text-gray-400 dark:text-gray-500 text-sm">No vaccines found for "{searchQ}"</p>
+              </div>
             )}
             {!searchQ && (
               <p className="text-center text-gray-300 dark:text-gray-600 text-sm mt-12">Start typing to search the vaccine library</p>
             )}
+            {/* Request new vaccine */}
+            <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 text-center">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Can't find the vaccine you're looking for?</p>
+              <button
+                onClick={() => setShowVaccineRequest(true)}
+                className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 font-medium hover:underline"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Request a new vaccine be added
+              </button>
+            </div>
           </div>
         </div>
+      )}
+
+      {showVaccineRequest && (
+        <VaccineRequestModal
+          initialName={searchQ}
+          onClose={() => setShowVaccineRequest(false)}
+        />
       )}
 
       {/* ── STEP 2: Details ── */}
@@ -233,6 +293,17 @@ export function AddVaccinePage() {
               value={form.Clinic}
               onChange={v => update('Clinic', v)}
               clinics={clinics}
+              userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
+              vaccineContext={selected && user ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'user',
+                targetId:    user.uid,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate('/')}
             />
 
             <PractitionerCombobox
@@ -246,6 +317,16 @@ export function AddVaccinePage() {
               label="Doctor / Nurse"
               placeholder="Search registered practitioners or type a name…"
               preferClinic={form.Clinic}
+              vaccineContext={selected && user ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'user',
+                targetId:    user.uid,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate('/')}
             />
             <Input
               label="Expiry date (optional)"
@@ -253,6 +334,16 @@ export function AddVaccinePage() {
               value={form.Expiration_date}
               onChange={e => update('Expiration_date', e.target.value)}
             />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
+              <textarea
+                value={form.Notes}
+                onChange={e => update('Notes', e.target.value)}
+                placeholder="Any observations, reactions, or details worth recording…"
+                rows={3}
+                className="w-full px-3.5 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
 
             {/* Validator email — required for trial/premarket, optional for others */}
             {isRestricted ? (

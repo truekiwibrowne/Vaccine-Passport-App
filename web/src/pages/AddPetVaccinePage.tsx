@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getAllVaccineLibraryEntries } from '../services/vaccineLibraryService'
 import { addPetVaccine, getPets } from '../services/petsService'
@@ -13,6 +13,7 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { ClinicCombobox } from '../components/ui/ClinicCombobox'
 import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
+import { VaccineRequestModal } from '../components/ui/VaccineRequestModal'
 
 // Map pet species → AnimalVaccineType used in the unified library
 const SPECIES_TO_ANIMAL_TYPE: Partial<Record<PetSpecies, AnimalVaccineType>> = {
@@ -55,19 +56,23 @@ function searchPetEntries(
 }
 
 export function AddPetVaccinePage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const { petId } = useParams<{ petId: string }>()
+  const location = useLocation()
 
-  const [step, setStep] = useState<'search' | 'details'>('search')
+  const preselected = (location.state as { preselected?: VaccineLibraryEntry } | null)?.preselected ?? null
+
+  const [step, setStep] = useState<'search' | 'details'>(preselected ? 'details' : 'search')
   const [library, setLibrary] = useState<VaccineLibraryEntry[]>([])
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [practitioners, setPractitioners] = useState<Practitioner[]>([])
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [searchQ, setSearchQ] = useState('')
-  const [selected, setSelected] = useState<VaccineLibraryEntry | null>(null)
+  const [selected, setSelected] = useState<VaccineLibraryEntry | null>(preselected)
   const [pet, setPet] = useState<Pet | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showVaccineRequest, setShowVaccineRequest] = useState(false)
 
   const [form, setForm] = useState({
     date_administration: new Date().toISOString().split('T')[0],
@@ -105,6 +110,24 @@ export function AddPetVaccinePage() {
   )
 
   function update(f: string, v: string) { setForm(prev => ({ ...prev, [f]: v })) }
+
+  async function saveForPendingRequest(): Promise<string | null> {
+    if (!user || !selected || !petId) return null
+    try {
+      return await addPetVaccine(user.uid, petId, {
+        vaccine_name:        selected.Vac_Name,
+        animal_vaccine_id:   selected.id,
+        disease_target:      selected['Disease Target'] ?? '',
+        date_administration: new Date(form.date_administration).toISOString(),
+        Expiration_date:     form.Expiration_date ? new Date(form.Expiration_date).toISOString() : null,
+        Clinic:              form.Clinic,
+        Doctor:              form.Doctor,
+      })
+    } catch (err) {
+      console.error('saveForPendingRequest failed:', err)
+      return null
+    }
+  }
 
   async function save() {
     if (!user || !selected || !petId) return
@@ -155,7 +178,7 @@ export function AddPetVaccinePage() {
           </svg>
         </button>
         <div>
-          <h1 className="font-semibold text-gray-900 dark:text-white">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
             {step === 'search' ? 'Select Vaccine' : 'Add Details'}
           </h1>
           {pet && (
@@ -240,9 +263,18 @@ export function AddPetVaccinePage() {
                 )}
               </button>
             ))}
+            <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 text-center">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Can't find the vaccine you're looking for?</p>
+              <button onClick={() => setShowVaccineRequest(true)} className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 font-medium hover:underline">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                Request a new vaccine be added
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {showVaccineRequest && <VaccineRequestModal initialName={searchQ} onClose={() => setShowVaccineRequest(false)} />}
 
       {/* Step 2 — Details */}
       {step === 'details' && selected && (
@@ -274,6 +306,17 @@ export function AddPetVaccinePage() {
               clinics={clinics}
               label="Veterinary Clinic"
               placeholder="Search registered vet clinics or type a name…"
+              userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
+              vaccineContext={selected && petId ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'pet',
+                targetId:    petId,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate(-1)}
             />
             <PractitionerCombobox
               value={form.Doctor}
@@ -286,6 +329,16 @@ export function AddPetVaccinePage() {
               label="Veterinarian"
               placeholder="Search registered vets or type a name…"
               preferClinic={form.Clinic}
+              vaccineContext={selected && petId ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'pet',
+                targetId:    petId,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate(-1)}
             />
             <Input
               label="Expiry date (optional)"

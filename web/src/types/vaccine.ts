@@ -17,6 +17,9 @@ export interface UserVaccine {
   Favourited: boolean
   pending_validation: boolean
   validator_email: string
+  Notes?: string
+  /** Copied from library entry at creation time — flags this as a border-entry-required vaccine */
+  isEntryRequirement?: boolean
   Created: string
   Updated: string
 }
@@ -27,4 +30,11 @@ export interface PublicVaccineRecord {
   authentication_level: number
   Authentication_Date: string | null
   Expiration_date: string | null
+  /**
+   * True when the vaccine is required for entry into at least one country.
+   * Set at record-creation time from the library entry's entryRequirementCountries field.
+   * Used by the public QR verify page to always show this vaccine in the
+   * "Entry Requirements" section regardless of keyword matching.
+   */
+  isEntryRequirement?: boolean
 }

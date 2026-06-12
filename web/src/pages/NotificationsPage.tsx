@@ -103,14 +103,13 @@ export function NotificationsPage() {
 function NotificationCard({
   notif,
   onNavigate,
-  onDismiss,
+  onDismiss: _onDismiss,
 }: {
   notif: UserNotification
   onNavigate?: () => void
   onDismiss: () => void
 }) {
-  const isApproval  = notif.type === 'approval'
-  const isRejection = notif.type === 'rejection'
+  const isApproval = notif.type === 'approval'
 
   return (
     <div className={`relative bg-white dark:bg-gray-800 rounded-2xl shadow-sm border overflow-hidden ${

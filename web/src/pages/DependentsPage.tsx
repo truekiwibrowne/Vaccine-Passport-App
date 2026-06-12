@@ -3,8 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Modal } from '../components/ui/Modal'
 import { Button } from '../components/ui/Button'
-import { getDependents, addDependent, updateDependent, deleteDependent } from '../services/dependentsService'
+import { getDependents, addDependent, updateDependent, deleteDependent, getDependentVaccines } from '../services/dependentsService'
 import type { Dependent } from '../types/dependent'
+
+interface DepStats {
+  total: number
+  verified: number
+  pending: number
+  expiringSoon: number
+}
 
 function computeAge(dob?: string): number | null {
   if (!dob) return null
@@ -29,6 +36,7 @@ export function DependentsPage() {
 
   const [dependents, setDependents] = useState<Dependent[]>([])
   const [loading, setLoading] = useState(true)
+  const [depStats, setDepStats] = useState<Record<string, DepStats>>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Dependent | null>(null)
   const [saving, setSaving] = useState(false)
@@ -42,7 +50,29 @@ export function DependentsPage() {
   useEffect(() => {
     if (!user) return
     getDependents(user.uid)
-      .then(setDependents)
+      .then(deps => {
+        setDependents(deps)
+        // Fetch vaccine stats for each dependent in parallel
+        deps.forEach(dep => {
+          getDependentVaccines(user.uid, dep.id).then(vaxes => {
+            const now = Date.now()
+            const expiringSoon = vaxes.filter(v => {
+              if (!v.Expiration_date) return false
+              const diff = new Date(v.Expiration_date).getTime() - now
+              return diff >= 0 && diff <= 30 * 86_400_000
+            }).length
+            setDepStats(prev => ({
+              ...prev,
+              [dep.id]: {
+                total:    vaxes.length,
+                verified: vaxes.filter(v => v.Authenticated === true).length,
+                pending:  vaxes.filter(v => v.pending_validation === true).length,
+                expiringSoon,
+              },
+            }))
+          })
+        })
+      })
       .finally(() => setLoading(false))
   }, [user])
 
@@ -148,7 +178,11 @@ export function DependentsPage() {
           dependents.map(dep => {
             const age = computeAge(dep.dateOfBirth)
             return (
-              <div key={dep.id} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm">
+              <div
+                key={dep.id}
+                onClick={() => navigate(`/dependents/${dep.id}`)}
+                className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer active:opacity-80 transition-opacity"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-900 dark:text-white text-base">{dep.name}</p>
@@ -167,7 +201,7 @@ export function DependentsPage() {
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
-                      onClick={() => openEdit(dep)}
+                      onClick={e => { e.stopPropagation(); openEdit(dep) }}
                       className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 active:scale-90 transition-transform"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -175,7 +209,7 @@ export function DependentsPage() {
                       </svg>
                     </button>
                     <button
-                      onClick={() => handleDelete(dep)}
+                      onClick={e => { e.stopPropagation(); handleDelete(dep) }}
                       className="p-2 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 active:scale-90 transition-transform"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -184,15 +218,64 @@ export function DependentsPage() {
                     </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => navigate(`/dependents/${dep.id}`)}
-                  className="mt-3 w-full text-sm font-medium text-blue-600 dark:text-blue-400 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors flex items-center justify-center gap-1"
-                >
-                  View Records
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
+
+                {/* ── Vaccine mini-dashboard ─────────────────────────────── */}
+                {(() => {
+                  const stats = depStats[dep.id]
+                  if (!stats) {
+                    // Loading skeleton
+                    return (
+                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center gap-1">
+                        {[...Array(4)].map((_, i) => (
+                          <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                            <div className="h-5 w-6 bg-gray-100 dark:bg-gray-700 rounded animate-pulse" />
+                            <div className="h-2 w-8 bg-gray-100 dark:bg-gray-700 rounded animate-pulse" />
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  }
+                  if (stats.total === 0) {
+                    return (
+                      <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                        <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-1">No vaccine records yet</p>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                      <div className="flex items-center gap-1">
+                        <div className="flex-1 flex flex-col items-center gap-0.5">
+                          <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.total}</span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium tracking-wide uppercase">Total</span>
+                        </div>
+                        <div className="w-px h-7 bg-gray-100 dark:bg-gray-700" />
+                        <div className="flex-1 flex flex-col items-center gap-0.5">
+                          <span className="text-lg font-bold text-green-500">{stats.verified}</span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium tracking-wide uppercase">Verified</span>
+                        </div>
+                        <div className="w-px h-7 bg-gray-100 dark:bg-gray-700" />
+                        <div className="flex-1 flex flex-col items-center gap-0.5">
+                          <span className="text-lg font-bold text-yellow-500">{stats.pending}</span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium tracking-wide uppercase">Pending</span>
+                        </div>
+                        <div className="w-px h-7 bg-gray-100 dark:bg-gray-700" />
+                        <div className="flex-1 flex flex-col items-center gap-0.5">
+                          <span className={`text-lg font-bold ${stats.total - stats.verified - stats.pending > 0 ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                            {stats.total - stats.verified - stats.pending}
+                          </span>
+                          <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium tracking-wide uppercase">Recorded</span>
+                        </div>
+                      </div>
+                      {stats.expiringSoon > 0 && (
+                        <p className="text-xs text-orange-500 font-medium mt-2">
+                          ⚠️ {stats.expiringSoon} vaccine{stats.expiringSoon !== 1 ? 's' : ''} expiring within 30 days
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
+
               </div>
             )
           })

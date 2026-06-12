@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getAllVaccineLibraryEntries, searchLibrary } from '../services/vaccineLibraryService'
 import { addDependentVaccine, getDependents } from '../services/dependentsService'
@@ -12,21 +12,26 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { ClinicCombobox } from '../components/ui/ClinicCombobox'
 import { PractitionerCombobox } from '../components/ui/PractitionerCombobox'
+import { VaccineRequestModal } from '../components/ui/VaccineRequestModal'
 import { VACCINE_STATUS_COLOURS } from '../types/vaccineLibrary'
 
 export function AddDependentVaccinePage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
   const { depId } = useParams<{ depId: string }>()
+  const location = useLocation()
 
-  const [step, setStep] = useState<'search' | 'details'>('search')
+  const preselected = (location.state as { preselected?: VaccineLibraryEntry } | null)?.preselected ?? null
+
+  const [step, setStep] = useState<'search' | 'details'>(preselected ? 'details' : 'search')
   const [library, setLibrary] = useState<VaccineLibraryEntry[]>([])
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [practitioners, setPractitioners] = useState<Practitioner[]>([])
   const [searchQ, setSearchQ] = useState('')
-  const [selected, setSelected] = useState<VaccineLibraryEntry | null>(null)
+  const [selected, setSelected] = useState<VaccineLibraryEntry | null>(preselected)
   const [dependent, setDependent] = useState<Dependent | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showVaccineRequest, setShowVaccineRequest] = useState(false)
 
   const [form, setForm] = useState({
     date_administration: new Date().toISOString().split('T')[0],
@@ -52,6 +57,35 @@ export function AddDependentVaccinePage() {
   const results = searchLibrary(library, searchQ).slice(0, 30)
   function update(f: string, v: string) { setForm(prev => ({ ...prev, [f]: v })) }
 
+  async function saveForPendingRequest(): Promise<string | null> {
+    if (!user || !selected || !depId) return null
+    try {
+      return await addDependentVaccine(user.uid, depId, {
+        user_id:             user.uid,
+        vaccine_id:          selected.id,
+        vaccine_name:        selected.Vac_Name,
+        Vaccine_Reference:   selected['Brand Name'] ?? selected.Vac_Name,
+        date_administration: new Date(form.date_administration).toISOString(),
+        Clinic:              form.Clinic,
+        Doctor:              form.Doctor,
+        Photo_Evidence:      '',
+        Supporting_files:    [],
+        Expiration_date:     form.Expiration_date ? new Date(form.Expiration_date).toISOString() : null,
+        Authenticated:       null,
+        Authentication_Date: null,
+        authentication_level: 0,
+        Authenticator:       null,
+        Favourited:          false,
+        pending_validation:  false,
+        validator_email:     '',
+        Notes:               form.Notes || undefined,
+      })
+    } catch (err) {
+      console.error('saveForPendingRequest failed:', err)
+      return null
+    }
+  }
+
   async function save() {
     if (!user || !selected || !depId) return
     setSaving(true)
@@ -74,6 +108,7 @@ export function AddDependentVaccinePage() {
         Favourited: false,
         pending_validation: false,
         validator_email: '',
+        Notes: form.Notes || undefined,
       })
       navigate(-1)
     } catch (e) {
@@ -100,7 +135,7 @@ export function AddDependentVaccinePage() {
           </svg>
         </button>
         <div>
-          <h1 className="font-semibold text-gray-900 dark:text-white">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
             {step === 'search' ? 'Select Vaccine' : 'Add Details'}
           </h1>
           {dependent && (
@@ -152,9 +187,18 @@ export function AddDependentVaccinePage() {
             {!searchQ && (
               <p className="text-center text-gray-300 dark:text-gray-600 text-sm mt-12">Start typing to search the vaccine library</p>
             )}
+            <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 text-center">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-2">Can't find the vaccine you're looking for?</p>
+              <button onClick={() => setShowVaccineRequest(true)} className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 font-medium hover:underline">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                Request a new vaccine be added
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {showVaccineRequest && <VaccineRequestModal initialName={searchQ} onClose={() => setShowVaccineRequest(false)} />}
 
       {/* Step 2: Details */}
       {step === 'details' && selected && (
@@ -183,6 +227,17 @@ export function AddDependentVaccinePage() {
               value={form.Clinic}
               onChange={v => update('Clinic', v)}
               clinics={clinics}
+              userCountry={profile?.currentCountry ?? profile?.Passport_Issuing_Country ?? ''}
+              vaccineContext={selected && depId ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'dependent',
+                targetId:    depId,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate(-1)}
             />
             <PractitionerCombobox
               value={form.Doctor}
@@ -194,6 +249,16 @@ export function AddDependentVaccinePage() {
               practitioners={practitioners}
               label="Doctor / Nurse"
               preferClinic={form.Clinic}
+              vaccineContext={selected && depId ? {
+                vaccineId:   selected.id,
+                vaccineName: selected.Vac_Name,
+                date:        form.date_administration,
+                doctor:      form.Doctor || undefined,
+                targetType:  'dependent',
+                targetId:    depId,
+              } : undefined}
+              onSaveVaccine={selected ? saveForPendingRequest : undefined}
+              onRequestComplete={() => navigate(-1)}
             />
             <Input
               label="Expiry date (optional)"

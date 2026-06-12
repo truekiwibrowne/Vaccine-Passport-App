@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { db } from '../firebase'
 import { useAuth } from '../contexts/AuthContext'
 import { useUserVaccines } from '../hooks/useUserVaccines'
 import { QRCodeDisplay } from '../components/passport/QRCodeDisplay'
@@ -11,6 +13,7 @@ import { getPets, getPetVaccines } from '../services/petsService'
 import type { Dependent } from '../types/dependent'
 import type { Pet } from '../types/pet'
 import { PET_SPECIES_EMOJI } from '../types/pet'
+import type { PHRPassportSummary } from '../types/user'
 
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin
 
@@ -26,12 +29,38 @@ export function PassportPage() {
   const [selected, setSelected] = useState<Selection>({ kind: 'me' })
   const [entityVaccineCount, setEntityVaccineCount] = useState<number | null>(null)
   const [entityLoading, setEntityLoading] = useState(false)
+  const [phrSummary, setPhrSummary] = useState<PHRPassportSummary | undefined>(undefined)
 
   useEffect(() => {
     if (!user) return
     getDependents(user.uid).then(setDependents)
     getPets(user.uid).then(setPets)
   }, [user])
+
+  // Load PHR summary and backfill any missing public-profile fields.
+  // Accounts created before photo/fullName/passportNumber sync was added won't have
+  // these in Public_Profile/summary — writing them here ensures the QR verify page
+  // always shows up-to-date identity info without requiring a manual profile save.
+  useEffect(() => {
+    if (!user || !profile) return
+    const summaryRef = doc(db, 'User_Data', user.uid, 'Public_Profile', 'summary')
+    getDoc(summaryRef)
+      .then(snap => {
+        const data = snap.exists() ? snap.data() : {}
+        setPhrSummary(data.phrSummary ?? undefined)
+
+        // Backfill any fields the public summary is missing
+        const updates: Record<string, unknown> = {}
+        if (!data.fullName      && profile.Full_Name)        updates.fullName       = profile.Full_Name
+        if (!data.firstName     && profile.Full_Name)        updates.firstName      = profile.Full_Name.split(' ')[0] || 'User'
+        if (!data.photoURL      && profile.Profile_Image)    updates.photoURL       = profile.Profile_Image
+        if (!data.passportNumber && profile.Passport_Number) updates.passportNumber = profile.Passport_Number
+        if (Object.keys(updates).length > 0) {
+          setDoc(summaryRef, updates, { merge: true }).catch(() => {/* non-critical */})
+        }
+      })
+      .catch(() => {/* PHR summary unavailable — silently skip */})
+  }, [user, profile])
 
   // Load vaccine count when non-me entity is selected
   useEffect(() => {
@@ -126,6 +155,7 @@ export function PassportPage() {
             firstName={firstName}
             vaccineCount={vaccines.length}
             verifiedCount={verified}
+            phrSummary={phrSummary}
           />
         )}
 

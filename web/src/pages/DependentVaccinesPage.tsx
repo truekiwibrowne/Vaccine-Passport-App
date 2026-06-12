@@ -3,13 +3,21 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { QRCodeSVG } from 'qrcode.react'
-import { getDependents, getDependentVaccines, deleteDependentVaccine } from '../services/dependentsService'
+import { getDependents, getDependentVaccines } from '../services/dependentsService'
 import type { Dependent } from '../types/dependent'
 import type { UserVaccine } from '../types/vaccine'
 import { formatDate } from '../utils/dateUtils'
 import { ShareManageModal } from '../components/ui/ShareManageModal'
 
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin
+
+type Filter = 'all' | 'verified' | 'pending'
+
+const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'all',      label: 'All' },
+  { key: 'verified', label: 'Verified' },
+  { key: 'pending',  label: 'Pending' },
+]
 
 function computeAge(dob?: string): number | null {
   if (!dob) return null
@@ -25,6 +33,24 @@ const SEX_LABELS: Record<string, string> = {
   male: 'Male', female: 'Female', intersex: 'Intersex', prefer_not_to_say: 'Prefer not to say',
 }
 
+function statusInfo(v: UserVaccine) {
+  if (v.pending_validation) return {
+    dot: 'bg-yellow-400',
+    text: 'Pending',
+    badge: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300',
+  }
+  if (v.Authenticated) return {
+    dot: 'bg-green-400',
+    text: `Verified${v.authentication_level ? ` · L${v.authentication_level}` : ''}`,
+    badge: 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
+  }
+  return {
+    dot: 'bg-gray-300 dark:bg-gray-600',
+    text: 'Recorded',
+    badge: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+  }
+}
+
 export function DependentVaccinesPage() {
   const { user } = useAuth()
   const { isDark } = useTheme()
@@ -35,6 +61,7 @@ export function DependentVaccinesPage() {
   const [vaccines, setVaccines] = useState<UserVaccine[]>([])
   const [loading, setLoading] = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
+  const [filter, setFilter] = useState<Filter>('all')
 
   useEffect(() => {
     if (!user || !depId) return
@@ -46,18 +73,6 @@ export function DependentVaccinesPage() {
       setVaccines(vaxes)
     }).finally(() => setLoading(false))
   }, [user, depId])
-
-  async function handleDelete(v: UserVaccine) {
-    if (!user || !depId) return
-    if (!window.confirm(`Remove ${v.vaccine_name}?`)) return
-    try {
-      await deleteDependentVaccine(user.uid, depId, v.user_vaccine_id)
-      setVaccines(prev => prev.filter(x => x.user_vaccine_id !== v.user_vaccine_id))
-    } catch (e) {
-      console.error(e)
-      alert('Error deleting. Please try again.')
-    }
-  }
 
   function handleShare() {
     if (!user || !depId) return
@@ -72,6 +87,20 @@ export function DependentVaccinesPage() {
 
   const qrUrl = user && depId ? `${APP_URL}/verify/dep/${user.uid}/${depId}` : ''
   const age = computeAge(dependent?.dateOfBirth)
+
+  const counts: Record<Filter, number> = {
+    all:      vaccines.length,
+    verified: vaccines.filter(v => v.Authenticated === true).length,
+    pending:  vaccines.filter(v => v.pending_validation === true).length,
+  }
+
+  const filtered = vaccines.filter(v => {
+    if (filter === 'verified') return v.Authenticated === true
+    if (filter === 'pending')  return v.pending_validation === true
+    return true
+  })
+
+  const verifiedCount = counts.verified
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -148,79 +177,126 @@ export function DependentVaccinesPage() {
                     <span className="text-xs bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
                       {vaccines.length} vaccine{vaccines.length !== 1 ? 's' : ''}
                     </span>
+                    {verifiedCount > 0 && (
+                      <span className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                        {verifiedCount} verified
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* QR card */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm flex flex-col items-center gap-3">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Vaccination Passport</p>
-              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-2xl">
-                <QRCodeSVG value={qrUrl} size={160} level="M" includeMargin />
+            {/* Vaccine records */}
+            <div>
+              <p className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">
+                Vaccine Records
+              </p>
+
+              {/* Filter tabs */}
+              <div className="flex bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
+                {FILTERS.map(f => (
+                  <button
+                    key={f.key}
+                    onClick={() => setFilter(f.key)}
+                    className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
+                      filter === f.key
+                        ? 'text-blue-600 border-b-2 border-blue-600'
+                        : 'text-gray-400 dark:text-gray-500 border-b-2 border-transparent'
+                    }`}
+                  >
+                    {f.label}
+                    {counts[f.key] > 0 && (
+                      <span className={`ml-1 text-[10px] ${filter === f.key ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600'}`}>
+                        {counts[f.key]}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
-              <p className="text-xs text-gray-400 dark:text-gray-500 text-center">Scan to verify vaccine status</p>
-              <button
-                onClick={handleShare}
-                className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 py-2 px-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-                Share QR
-              </button>
+
+              {/* Vaccine list */}
+              <div className="mt-3">
+                {filtered.length === 0 ? (
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-sm text-center">
+                    <p className="font-medium text-gray-500 dark:text-gray-400">
+                      {vaccines.length === 0 ? 'No vaccines yet' : `No ${filter} vaccines`}
+                    </p>
+                    {vaccines.length === 0 && (
+                      <button
+                        onClick={() => navigate(`/dependents/${depId}/vaccines/add`)}
+                        className="mt-3 text-sm font-medium text-blue-600 dark:text-blue-400 py-2 px-4 rounded-xl bg-blue-50 dark:bg-blue-900/20"
+                      >
+                        Add first vaccine
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
+                    {filtered.map((v, i) => {
+                      const { dot, text, badge } = statusInfo(v)
+                      return (
+                        <div key={v.user_vaccine_id}>
+                          {i > 0 && <div className="h-px bg-gray-100 dark:bg-gray-700/60 mx-4" />}
+                          <div
+                            onClick={() => navigate(`/dependents/${depId}/vaccines/${v.user_vaccine_id}`)}
+                            className="flex items-center gap-3 px-4 py-3.5 cursor-pointer active:bg-gray-50 dark:active:bg-gray-800/60 transition-colors"
+                          >
+                            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                              <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{v.vaccine_name}</p>
+                              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                                <span>{text}</span>
+                                {v.date_administration && <span>· {formatDate(v.date_administration)}</span>}
+                              </p>
+                              {v.Clinic && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{v.Clinic}</p>}
+                            </div>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${badge}`}>
+                              {text.split(' ·')[0]}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Vaccine list */}
-            <div>
-              <p className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">Vaccine Records</p>
-              {vaccines.length === 0 ? (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-sm text-center">
-                  <p className="font-medium text-gray-500 dark:text-gray-400">No vaccines yet</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 mb-4">Add their first vaccine record</p>
-                  <button
-                    onClick={() => navigate(`/dependents/${depId}/vaccines/add`)}
-                    className="text-sm font-medium text-blue-600 dark:text-blue-400 py-2 px-4 rounded-xl bg-blue-50 dark:bg-blue-900/20"
-                  >
-                    Add Vaccine
-                  </button>
+            {/* Vaccination Passport QR — below the list */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 pt-4 pb-2">
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-center mb-3">
+                  Vaccination Passport
+                </p>
+              </div>
+              <div className="px-4 pb-4 flex flex-col items-center gap-3">
+                <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-2xl">
+                  <QRCodeSVG value={qrUrl} size={160} level="M" includeMargin />
                 </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {vaccines.map(v => (
-                    <div
-                      key={v.user_vaccine_id}
-                      className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm cursor-pointer active:opacity-80 transition-opacity"
-                      onClick={() => navigate(`/dependents/${depId}/vaccines/${v.user_vaccine_id}`)}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-gray-900 dark:text-white text-sm">{v.vaccine_name}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{formatDate(v.date_administration)}</p>
-                          {v.Clinic && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{v.Clinic}</p>}
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">
-                            Recorded
-                          </span>
-                          <button
-                            onClick={e => { e.stopPropagation(); handleDelete(v) }}
-                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 active:scale-90 transition-transform"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+                  {dependent?.name ?? 'Dependent'} · {verifiedCount} verified · {vaccines.length} total
+                </p>
+                <button
+                  onClick={handleShare}
+                  className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 py-2 px-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                  Share QR
+                </button>
+              </div>
             </div>
           </>
         )}
       </div>
+
       {/* Share access modal */}
       {dependent && (
         <ShareManageModal

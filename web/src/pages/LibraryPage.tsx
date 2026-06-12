@@ -5,16 +5,24 @@ import { useUserVaccines } from '../hooks/useUserVaccines'
 import { useAuth } from '../contexts/AuthContext'
 import { useIpLocation } from '../hooks/useIpLocation'
 import { useIsLg } from '../hooks/useMediaQuery'
+import { ResizableSplitPane } from '../components/layout/ResizableSplitPane'
 import { searchLibrary } from '../services/vaccineLibraryService'
 import { computeRelevanceScore } from '../utils/relevanceScore'
 import { getPets } from '../services/petsService'
 import { getFarmAnimals } from '../services/farmService'
+import { getDependents } from '../services/dependentsService'
 import { getContraindication } from '../utils/contraindications'
 import type { HealthCondition } from '../utils/contraindications'
 import type { VaccineCategory, AnimalVaccineType } from '../types/vaccineLibrary'
 import { VACCINE_CATEGORY_LABELS, VACCINE_CATEGORY_COLOURS } from '../types/vaccineLibrary'
+import type { Pet } from '../types/pet'
+import { PET_SPECIES_EMOJI, PET_SPECIES_LABELS } from '../types/pet'
+import type { FarmAnimal } from '../types/farm'
+import { FARM_SPECIES_EMOJI, FARM_SPECIES_LABELS } from '../types/farm'
+import type { Dependent } from '../types/dependent'
 import { LibraryCard } from '../components/library/LibraryCard'
 import { LibraryDetail } from '../components/library/LibraryDetail'
+import type { AddDestination } from '../components/library/LibraryDetail'
 import { CountryPicker } from '../components/ui/CountryPicker'
 import { Spinner } from '../components/ui/Spinner'
 import { useTheme } from '../contexts/ThemeContext'
@@ -60,22 +68,26 @@ export function LibraryPage() {
   const healthConditions = (profile?.healthConditions ?? []) as HealthCondition[]
   const isFarmMode = profile?.appMode === 'farm'
 
-  // ── Species sets for relevance gating ────────────────────────────────────
-  const [petSpecies, setPetSpecies] = useState<Set<string>>(new Set())
-  const [farmSpecies, setFarmSpecies] = useState<Set<string> | undefined>(undefined)
+  // ── Species sets for relevance gating + full lists for destination dropdown ─
+  const [petSpecies,    setPetSpecies]    = useState<Set<string>>(new Set())
+  const [farmSpecies,   setFarmSpecies]   = useState<Set<string> | undefined>(undefined)
+  const [allPets,       setAllPets]       = useState<Pet[]>([])
+  const [allFarmAnimals,setAllFarmAnimals]= useState<FarmAnimal[]>([])
+  const [dependants,    setDependants]    = useState<Dependent[]>([])
 
   useEffect(() => {
     if (!user) return
-    if (!isFarmMode) {
-      getPets(user.uid).then(pets => {
-        setPetSpecies(new Set(pets.map(p => p.species)))
-      }).catch(() => {/* non-fatal */})
-    } else {
-      getFarmAnimals(user.uid).then(animals => {
-        setFarmSpecies(new Set(animals.map(a => a.species)))
-      }).catch(() => {/* non-fatal */})
-    }
-  }, [user, isFarmMode])
+    // Always load all three so the destination dropdown works regardless of app mode
+    getPets(user.uid).then(pets => {
+      setAllPets(pets)
+      setPetSpecies(new Set(pets.map(p => p.species)))
+    }).catch(() => {/* non-fatal */})
+    getFarmAnimals(user.uid).then(animals => {
+      setAllFarmAnimals(animals)
+      setFarmSpecies(new Set(animals.map(a => a.species)))
+    }).catch(() => {/* non-fatal */})
+    getDependents(user.uid).then(setDependants).catch(() => {/* non-fatal */})
+  }, [user])
 
   const scoredAndFiltered = useMemo(() => {
     let results = searchLibrary(library, searchQ)
@@ -133,6 +145,71 @@ export function LibraryPage() {
     () => scoredAndFiltered.find(e => e.id === selectedId) ?? null,
     [scoredAndFiltered, selectedId]
   )
+
+  // ── Destination list for the "Add to…" dropdown ───────────────────────────
+  const destinations = useMemo((): AddDestination[] => {
+    if (!selectedEntry) return []
+    const cat = selectedEntry.category
+
+    if (cat === 'animal') {
+      // Farm profile → herds first, then individual animals; personal profile → pets only
+      if (isFarmMode) {
+        const herdMap = new Map<string, typeof allFarmAnimals>()
+        const ungrouped: typeof allFarmAnimals = []
+        for (const a of allFarmAnimals) {
+          if (a.herd) {
+            if (!herdMap.has(a.herd)) herdMap.set(a.herd, [])
+            herdMap.get(a.herd)!.push(a)
+          } else {
+            ungrouped.push(a)
+          }
+        }
+        // Ungrouped animals form their own implicit herd only if all animals are ungrouped
+        const herdDests: AddDestination[] = Array.from(herdMap.entries()).map(([herdName, animals]) => ({
+          type: 'farm_herd' as const,
+          herdAnimalIds: animals.map(a => a.id),
+          label: herdName,
+          sublabel: `${animals.length} animal${animals.length !== 1 ? 's' : ''}`,
+          emoji: FARM_SPECIES_EMOJI[animals[0].species] ?? '🐄',
+        }))
+        const individualDests: AddDestination[] = allFarmAnimals.map(a => ({
+          type: 'farm' as const,
+          id: a.id,
+          label: a.name || `Tag: ${a.tagNumber}`,
+          sublabel: FARM_SPECIES_LABELS[a.species] + (a.herd ? ` · ${a.herd}` : ''),
+          emoji: FARM_SPECIES_EMOJI[a.species],
+        }))
+        return [...herdDests, ...individualDests]
+      }
+      return allPets.map(p => ({
+        type: 'pet' as const,
+        id: p.id,
+        label: p.name,
+        sublabel: PET_SPECIES_LABELS[p.species],
+        emoji: PET_SPECIES_EMOJI[p.species],
+      }))
+    }
+
+    if (cat === 'human_child') {
+      return dependants.map(d => ({
+        type: 'dependent' as const,
+        id: d.id,
+        label: d.name,
+        emoji: '👶',
+      }))
+    }
+
+    // human_adult or no category → user + dependants
+    return [
+      { type: 'self' as const, label: 'My Vaccines', emoji: '💉' },
+      ...dependants.map(d => ({
+        type: 'dependent' as const,
+        id: d.id,
+        label: d.name,
+        emoji: '👶',
+      })),
+    ]
+  }, [selectedEntry, allPets, allFarmAnimals, dependants, isFarmMode])
 
   function handleCardClick(id: string) {
     if (isDesktop) {
@@ -323,93 +400,98 @@ export function LibraryPage() {
 
   // ── Desktop split-pane layout ─────────────────────────────────────────────
   if (isDesktop) {
-    return (
-      <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-900">
-        {/* LEFT PANEL — list */}
-        <div className="w-96 flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 h-full">
-          {/* Header */}
-          <div
-            className="px-4 pt-5 pb-3 border-b border-gray-200/60 dark:border-gray-700/60"
-            style={{
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              background: isDark ? 'rgba(15,15,15,0.80)' : 'rgba(242,242,247,0.80)',
-            }}
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <button
-                onClick={() => navigate(-1)}
-                className="p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <h1 className="text-base font-bold text-gray-900 dark:text-white flex-1">{categoryTitle}</h1>
-            </div>
-            {filterBar}
+    const leftPanel = (
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div
+          className="px-4 pt-5 pb-3 border-b border-gray-200/60 dark:border-gray-700/60 flex-shrink-0"
+          style={{
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            background: isDark ? 'rgba(15,15,15,0.80)' : 'rgba(242,242,247,0.80)',
+          }}
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => navigate(-1)}
+              className="p-2 -ml-2"
+            >
+              <svg className="w-5 h-5 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-white flex-1">{categoryTitle}</h1>
           </div>
-
-          {/* List */}
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-            {loading ? (
-              <div className="flex justify-center py-12"><Spinner /></div>
-            ) : (
-              <>
-                <p className="text-xs text-gray-400 dark:text-gray-500 px-1">
-                  {scoredAndFiltered.length} {categoryFilter === 'animal' ? 'veterinary vaccines' : 'vaccines'} · sorted by relevance
-                </p>
-                {scoredAndFiltered.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3">
-                      <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                    </div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                      {searchQ ? `No results for "${searchQ}"` : `No ${VACCINE_CATEGORY_LABELS[categoryFilter as VaccineCategory] ?? ''} vaccines yet`}
-                    </p>
-                  </div>
-                ) : (
-                  scoredAndFiltered.map(entry => (
-                    <LibraryCard
-                      key={entry.id}
-                      entry={entry}
-                      contraindication={entry.contraindication ?? null}
-                      alreadyAdded={vaccines.some(v => v.vaccine_id === entry.id)}
-                      onSelect={handleCardClick}
-                      selected={entry.id === selectedId}
-                    />
-                  ))
-                )}
-              </>
-            )}
-          </div>
+          {filterBar}
         </div>
-
-        {/* RIGHT PANEL — detail */}
-        <div className="flex-1 h-full overflow-y-auto">
-          {selectedEntry ? (
-            <div className="px-6 py-5">
-              <LibraryDetail
-                entry={selectedEntry}
-                embedded
-                showAddButton={true}
-                onAdd={() => navigate('/vaccines/add', { state: { preselected: selectedEntry } })}
-              />
-            </div>
+        {/* List */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+          {loading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center px-8">
-              <div className="w-20 h-20 rounded-3xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
-                <svg className="w-10 h-10 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-              </div>
-              <p className="text-lg font-semibold text-gray-400 dark:text-gray-500">Select a vaccine</p>
-              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Click any vaccine from the list to view its details here</p>
-            </div>
+            <>
+              <p className="text-xs text-gray-400 dark:text-gray-500 px-1">
+                {scoredAndFiltered.length} {categoryFilter === 'animal' ? 'veterinary vaccines' : 'vaccines'} · sorted by relevance
+              </p>
+              {scoredAndFiltered.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    {searchQ ? `No results for "${searchQ}"` : `No ${VACCINE_CATEGORY_LABELS[categoryFilter as VaccineCategory] ?? ''} vaccines yet`}
+                  </p>
+                </div>
+              ) : (
+                scoredAndFiltered.map(entry => (
+                  <LibraryCard
+                    key={entry.id}
+                    entry={entry}
+                    contraindication={entry.contraindication ?? null}
+                    alreadyAdded={vaccines.some(v => v.vaccine_id === entry.id)}
+                    onSelect={handleCardClick}
+                    selected={entry.id === selectedId}
+                  />
+                ))
+              )}
+            </>
           )}
         </div>
+      </div>
+    )
+
+    const rightPanel = selectedEntry ? (
+      <div className="px-6 py-5">
+        <LibraryDetail
+          entry={selectedEntry}
+          embedded
+          showAddButton={true}
+          destinations={destinations}
+        />
+      </div>
+    ) : (
+      <div className="flex flex-col items-center justify-center h-full text-center px-8">
+        <div className="w-20 h-20 rounded-3xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
+          <svg className="w-10 h-10 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+        </div>
+        <p className="text-lg font-semibold text-gray-400 dark:text-gray-500">Select a vaccine</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Click any vaccine from the list to view its details here</p>
+      </div>
+    )
+
+    return (
+      <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-900">
+        <ResizableSplitPane
+          storageKey="splitPane:library"
+          leftClassName="flex flex-col overflow-hidden bg-gray-50 dark:bg-gray-900"
+          rightClassName="overflow-y-auto bg-gray-50 dark:bg-gray-900"
+          left={leftPanel}
+          right={rightPanel}
+        />
       </div>
     )
   }

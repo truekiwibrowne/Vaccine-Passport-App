@@ -72,6 +72,15 @@ export function ValidationInboxPage() {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                      req.record_type === 'sexual_health'
+                        ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-300'
+                        : 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300'
+                    }`}>
+                      {req.record_type === 'sexual_health' ? '🔒 Private Health' : '💉 Vaccine'}
+                    </span>
+                  </div>
                   <p className="font-semibold text-gray-900 dark:text-white truncate">{req.vaccine_name}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">From: {req.requestor_email}</p>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{formatDate(req.requested_at)}</p>
@@ -91,17 +100,26 @@ export function ValidationInboxPage() {
       <Modal open={!!selected} onClose={() => setSelected(null)} title="Review Validation Request">
         {selected && (
           <div className="space-y-4">
-            <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3">
-              <p className="font-semibold text-blue-900 dark:text-blue-100">{selected.vaccine_name}</p>
-              <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">Requested by: {selected.requestor_email}</p>
-              <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">Date: {formatDate(selected.requested_at)}</p>
+            <div className={`rounded-xl p-3 ${selected.record_type === 'sexual_health' ? 'bg-violet-50 dark:bg-violet-900/30' : 'bg-blue-50 dark:bg-blue-900/30'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                  selected.record_type === 'sexual_health'
+                    ? 'bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-200'
+                    : 'bg-blue-200 dark:bg-blue-800 text-blue-700 dark:text-blue-200'
+                }`}>
+                  {selected.record_type === 'sexual_health' ? '🔒 Private Health Record' : '💉 Vaccine Record'}
+                </span>
+              </div>
+              <p className={`font-semibold ${selected.record_type === 'sexual_health' ? 'text-violet-900 dark:text-violet-100' : 'text-blue-900 dark:text-blue-100'}`}>{selected.vaccine_name}</p>
+              <p className={`text-xs mt-0.5 ${selected.record_type === 'sexual_health' ? 'text-violet-600 dark:text-violet-400' : 'text-blue-600 dark:text-blue-400'}`}>Requested by: {selected.requestor_email}</p>
+              <p className={`text-xs mt-0.5 ${selected.record_type === 'sexual_health' ? 'text-violet-500 dark:text-violet-400' : 'text-blue-500 dark:text-blue-400'}`}>Date: {formatDate(selected.requested_at)}</p>
             </div>
 
             <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-3">
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Authentication Level</p>
               <p className="text-sm text-gray-700 dark:text-gray-300">
                 Automatically determined by your verified practitioner level.
-                The vaccine will receive the appropriate trust level based on your registration status.
+                The record will receive the appropriate trust level based on your registration status.
               </p>
             </div>
 
