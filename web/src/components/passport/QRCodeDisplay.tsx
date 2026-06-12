@@ -16,14 +16,13 @@ interface Props {
 // ── PDF passport export ──────────────────────────────────────────────────────
 
 async function exportPassportPdf(
-  uid: string,
+  _uid: string,
   firstName: string,
   vaccineCount: number,
   verifiedCount: number,
   qrCanvas: HTMLCanvasElement,
   phrSummary?: PHRPassportSummary,
 ) {
-  const _url = buildVerifyUrl(uid)
   const now  = new Date()
   const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
