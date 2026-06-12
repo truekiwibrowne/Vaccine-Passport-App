@@ -4,6 +4,7 @@ serviceAccountKey.json
 .env
 .env.*
 !.env.example
+!web/.env.production
 
 # ── Node ───────────────────────────────────────────────────────────
 node_modules/
