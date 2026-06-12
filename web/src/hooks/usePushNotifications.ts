@@ -44,7 +44,7 @@ export function usePushNotifications(uid: string | undefined): PushNotificationS
       }
 
       if (!VAPID_KEY) {
-        setErrorMessage('VITE_FIREBASE_VAPID_KEY is not set. Add it to Netlify environment variables and redeploy.')
+        setErrorMessage('VITE_FIREBASE_VAPID_KEY is not set. Add it to .env.production and redeploy.')
         setTokenState('error')
         return
       }
@@ -61,7 +61,7 @@ export function usePushNotifications(uid: string | undefined): PushNotificationS
         const swMissing = msg.includes('service-worker') || msg.includes('messaging/failed-service-worker')
         setErrorMessage(
           swMissing
-            ? 'Service worker not found. Trigger a new Netlify deploy so the service worker is generated with your VAPID key, then try again.'
+            ? 'Service worker not found. The app needs to be rebuilt with your VAPID key — a new deploy should fix this. Try again after the latest build completes.'
             : `FCM token error: ${msg}`
         )
         setTokenState('error')
