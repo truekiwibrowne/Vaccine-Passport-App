@@ -23,7 +23,7 @@ async function exportPassportPdf(
   qrCanvas: HTMLCanvasElement,
   phrSummary?: PHRPassportSummary,
 ) {
-  const url  = buildVerifyUrl(uid)
+  const _url = buildVerifyUrl(uid)
   const now  = new Date()
   const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
