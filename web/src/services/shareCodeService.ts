@@ -52,15 +52,18 @@ export async function createShareCode(
   const now = Timestamp.now()
   const key = lookupKey(resourceType, resourceId)
 
-  // Cancel any existing pending lookup for this resource before creating a new one.
-  // (batch.set on an existing doc hits the update rule, not create, and would be denied.)
+  // If any lookup doc already exists (pending, cancelled, or claimed), delete it first.
+  // batch.set() on an existing doc is treated as an update by Firestore rules, which
+  // only allows cancel/claim transitions — not creating a fresh pending code.
   const existingSnap = await getDoc(doc(db, 'Share_Code_Lookup', key))
-  if (existingSnap.exists() && existingSnap.data().status === 'pending') {
-    const oldCode = existingSnap.data().code as string
-    const cancelBatch = writeBatch(db)
-    cancelBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
-    cancelBatch.update(doc(db, 'Share_Code_Lookup', key), { status: 'cancelled' })
-    await cancelBatch.commit()
+  if (existingSnap.exists()) {
+    const prepareBatch = writeBatch(db)
+    if (existingSnap.data().status === 'pending') {
+      const oldCode = existingSnap.data().code as string
+      prepareBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
+    }
+    prepareBatch.delete(doc(db, 'Share_Code_Lookup', key))
+    await prepareBatch.commit()
   }
 
   const batch = writeBatch(db)
@@ -99,28 +102,33 @@ export async function createFarmGroupShareCode(
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + EXPIRY_HOURS * 3_600_000))
   const now = Timestamp.now()
 
-  // Read all existing lookup docs in parallel, cancel any that are still pending.
+  // Read all existing lookup docs in parallel.
+  // Delete any that exist (regardless of status) — batch.set() on an existing doc
+  // is treated as an update by Firestore rules and would be denied for a new pending code.
   const keys = animals.map(a => `sanimal_${a.id}`)
   const lookupSnaps = await Promise.all(keys.map(k => getDoc(doc(db, 'Share_Code_Lookup', k))))
 
-  const pendingByCode = new Map<string, string[]>()
+  const pendingCodesToCancel = new Set<string>()
+  const existingLookupKeys: string[] = []
+
   for (const snap of lookupSnaps) {
-    if (snap.exists() && snap.data().status === 'pending') {
-      const oldCode = snap.data().code as string
-      if (!pendingByCode.has(oldCode)) pendingByCode.set(oldCode, [])
-      pendingByCode.get(oldCode)!.push(snap.id)
+    if (snap.exists()) {
+      existingLookupKeys.push(snap.id)
+      if (snap.data().status === 'pending') {
+        pendingCodesToCancel.add(snap.data().code as string)
+      }
     }
   }
 
-  if (pendingByCode.size > 0) {
-    const cancelBatch = writeBatch(db)
-    for (const [oldCode, lookupKeys] of pendingByCode) {
-      cancelBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
-      for (const k of lookupKeys) {
-        cancelBatch.update(doc(db, 'Share_Code_Lookup', k), { status: 'cancelled' })
-      }
+  if (existingLookupKeys.length > 0) {
+    const prepareBatch = writeBatch(db)
+    for (const oldCode of pendingCodesToCancel) {
+      prepareBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
     }
-    await cancelBatch.commit()
+    for (const k of existingLookupKeys) {
+      prepareBatch.delete(doc(db, 'Share_Code_Lookup', k))
+    }
+    await prepareBatch.commit()
   }
 
   const batch = writeBatch(db)
