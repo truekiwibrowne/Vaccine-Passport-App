@@ -47,22 +47,26 @@ export async function createShareCode(
   resourceId: string,
   resourceName: string,
 ): Promise<string> {
-  // Pets and Dependents have a legacy path (User_Data/{uid}/...). If the document
-  // doesn't exist yet at the top-level collection, migrate it so the share claim
-  // can write members[] to the canonical location.
-  const topRef = doc(db, resourceColName(resourceType), resourceId)
-  const topSnap = await getDoc(topRef)
-  if (!topSnap.exists()) {
-    const legacyRef =
-      resourceType === 'pet'
+  // Pets and Dependents may only exist at the legacy User_Data path. Ensure the
+  // document exists at the top-level collection so the claim can write members[].
+  // getDoc on a non-existent doc is permission-denied (read rule requires membership),
+  // so treat any read error the same as "not found at top level".
+  if (resourceType === 'pet' || resourceType === 'dependent') {
+    const topRef = doc(db, resourceColName(resourceType), resourceId)
+    let topExists = false
+    try { topExists = (await getDoc(topRef)).exists() } catch { topExists = false }
+
+    if (!topExists) {
+      const legacyRef = resourceType === 'pet'
         ? doc(db, 'User_Data', senderUid, 'Pets', resourceId)
-        : resourceType === 'dependent'
-          ? doc(db, 'User_Data', senderUid, 'Dependents', resourceId)
-          : null
-    if (legacyRef) {
-      const legacySnap = await getDoc(legacyRef)
-      if (legacySnap.exists()) {
-        await setDoc(topRef, { ...legacySnap.data(), ownerId: senderUid, members: [senderUid] })
+        : doc(db, 'User_Data', senderUid, 'Dependents', resourceId)
+      try {
+        const legacySnap = await getDoc(legacyRef)
+        if (legacySnap.exists()) {
+          await setDoc(topRef, { ...legacySnap.data(), ownerId: senderUid, members: [senderUid] })
+        }
+      } catch {
+        // Legacy doc also unreadable — resource must already exist at top level or is inaccessible.
       }
     }
   }
