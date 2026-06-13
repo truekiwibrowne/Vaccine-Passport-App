@@ -148,8 +148,7 @@ service cloud.firestore {
                         && request.auth.uid in request.resource.data.members
                         && exists(/databases/$(database)/documents/Share_Code_Lookup/$('sanimal_' + animalId))
                         && get(/databases/$(database)/documents/Share_Code_Lookup/$('sanimal_' + animalId)).data.status == 'pending'
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sanimal_' + animalId)).data.expiresAt > request.time
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sanimal_' + animalId)).data.senderUid in resource.data.members);
+                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sanimal_' + animalId)).data.expiresAt > request.time);
       allow delete: if isSignedIn()
                     && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
@@ -184,8 +183,7 @@ service cloud.firestore {
                         && request.auth.uid in request.resource.data.members
                         && exists(/databases/$(database)/documents/Share_Code_Lookup/$('spet_' + petId))
                         && get(/databases/$(database)/documents/Share_Code_Lookup/$('spet_' + petId)).data.status == 'pending'
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('spet_' + petId)).data.expiresAt > request.time
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('spet_' + petId)).data.senderUid in resource.data.members);
+                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('spet_' + petId)).data.expiresAt > request.time);
       allow delete: if isSignedIn()
                     && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
@@ -211,8 +209,7 @@ service cloud.firestore {
                         && request.auth.uid in request.resource.data.members
                         && exists(/databases/$(database)/documents/Share_Code_Lookup/$('sdep_' + depId))
                         && get(/databases/$(database)/documents/Share_Code_Lookup/$('sdep_' + depId)).data.status == 'pending'
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sdep_' + depId)).data.expiresAt > request.time
-                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sdep_' + depId)).data.senderUid in resource.data.members);
+                        && get(/databases/$(database)/documents/Share_Code_Lookup/$('sdep_' + depId)).data.expiresAt > request.time);
       allow delete: if isSignedIn()
                     && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
