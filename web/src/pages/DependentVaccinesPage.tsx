@@ -8,6 +8,8 @@ import type { Dependent } from '../types/dependent'
 import type { UserVaccine } from '../types/vaccine'
 import { formatDate } from '../utils/dateUtils'
 import { ShareManageModal } from '../components/ui/ShareManageModal'
+import { TransferCodeModal } from '../components/transfer/TransferCodeModal'
+import { countDependentVaccines } from '../services/transferService'
 
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin
 
@@ -61,6 +63,8 @@ export function DependentVaccinesPage() {
   const [vaccines, setVaccines] = useState<UserVaccine[]>([])
   const [loading, setLoading] = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferVaccineCount, setTransferVaccineCount] = useState(0)
   const [filter, setFilter] = useState<Filter>('all')
 
   useEffect(() => {
@@ -268,6 +272,31 @@ export function DependentVaccinesPage() {
               </div>
             </div>
 
+            {/* Transfer to own account */}
+            {dependent && user?.uid === dependent.ownerId && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-4">
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">
+                  Account Transfer
+                </p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+                  If {dependent.name} is creating their own account, transfer their vaccine records to it.
+                </p>
+                <button
+                  onClick={async () => {
+                    const count = await countDependentVaccines(dependent.id)
+                    setTransferVaccineCount(count)
+                    setTransferOpen(true)
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-700 text-sm font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors"
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                  </svg>
+                  Generate Transfer Code
+                </button>
+              </div>
+            )}
+
             {/* Vaccination Passport QR — below the list */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-4 pt-4 pb-2">
@@ -306,6 +335,18 @@ export function DependentVaccinesPage() {
           resourceId={dependent.id}
           resourceName={dependent.name}
           ownerId={dependent.ownerId ?? user?.uid ?? ''}
+        />
+      )}
+
+      {/* Transfer modal */}
+      {transferOpen && dependent && user && (
+        <TransferCodeModal
+          senderUid={user.uid}
+          type="dependent"
+          entityIds={[dependent.id]}
+          entityNames={[dependent.name]}
+          vaccineCount={transferVaccineCount}
+          onClose={() => setTransferOpen(false)}
         />
       )}
     </div>

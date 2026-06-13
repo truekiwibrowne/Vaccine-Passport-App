@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getFarmAnimals, archiveFarmAnimal, updateFarmAnimal } from '../services/farmService'
 import { sendShareInvite } from '../services/sharingService'
+import { countFarmAnimalVaccines } from '../services/transferService'
+import { TransferCodeModal } from '../components/transfer/TransferCodeModal'
 import type { FarmAnimal, FarmSpecies, FarmAnimalStatus } from '../types/farm'
 import {
   FARM_SPECIES_LABELS, FARM_SPECIES_CODE, ALL_FARM_SPECIES,
@@ -240,6 +242,12 @@ export function FarmPage() {
   const [bulkShareEmail, setBulkShareEmail] = useState('')
   const [bulkSharing, setBulkSharing] = useState(false)
 
+  // ── Bulk transfer modal state ───────────────────────────────────────────────
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferEntityIds, setTransferEntityIds] = useState<string[]>([])
+  const [transferEntityNames, setTransferEntityNames] = useState<string[]>([])
+  const [transferVaccineCount, setTransferVaccineCount] = useState(0)
+
   // ── Bulk edit modal state ───────────────────────────────────────────────────
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkEditForm, setBulkEditForm] = useState({ herd: '', paddock: '', status: '' as FarmAnimalStatus | '' })
@@ -383,6 +391,27 @@ export function FarmPage() {
     } finally {
       setBulkSaving(false)
     }
+  }
+
+  // ── Bulk transfer ───────────────────────────────────────────────────────────
+
+  async function handleOpenBulkTransfer() {
+    if (!user || selectedIds.size === 0) return
+    const selectedAnimals = animals.filter(a => selectedIds.has(a.id) && a.ownerId === user.uid)
+    if (selectedAnimals.length === 0) {
+      alert('You can only transfer animals you own.')
+      return
+    }
+    if (selectedAnimals.length !== selectedIds.size) {
+      alert(`You can only transfer animals you own. ${selectedIds.size - selectedAnimals.length} animal(s) will be excluded.`)
+    }
+    const ids = selectedAnimals.map(a => a.id)
+    const names = selectedAnimals.map(a => a.name ?? `#${a.tagNumber}`)
+    const counts = await Promise.all(ids.map(id => countFarmAnimalVaccines(id)))
+    setTransferEntityIds(ids)
+    setTransferEntityNames(names)
+    setTransferVaccineCount(counts.reduce((s, n) => s + n, 0))
+    setTransferOpen(true)
   }
 
   // ── CSV export ──────────────────────────────────────────────────────────────
@@ -940,6 +969,15 @@ export function FarmPage() {
                 Edit
               </button>
               <button
+                onClick={handleOpenBulkTransfer}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-blue-300 dark:border-blue-700 text-xs font-semibold text-blue-600 dark:text-blue-400 active:bg-blue-50 dark:active:bg-blue-900/20"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+                Transfer
+              </button>
+              <button
                 onClick={handleBulkArchive}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-red-300 dark:border-red-700 text-xs font-semibold text-red-600 dark:text-red-400 active:bg-red-50 dark:active:bg-red-900/20"
               >
@@ -1150,6 +1188,17 @@ export function FarmPage() {
             </div>
           </div>
         </div>
+      )}
+      {/* ── Transfer Modal ────────────────────────────────────────────────────── */}
+      {transferOpen && user && transferEntityIds.length > 0 && (
+        <TransferCodeModal
+          senderUid={user.uid}
+          type="farm_animals"
+          entityIds={transferEntityIds}
+          entityNames={transferEntityNames}
+          vaccineCount={transferVaccineCount}
+          onClose={() => setTransferOpen(false)}
+        />
       )}
     </div>
   )

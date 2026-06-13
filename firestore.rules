@@ -132,7 +132,16 @@ service cloud.firestore {
       allow read:   if isMember(resource.data.members) || isAdmin();
       allow create: if willBeMember()
                     && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isMember(resource.data.members) || isAdmin();
+      allow update: if isMember(resource.data.members) || isAdmin()
+                    // Transfer claim: recipient takes ownership via a pending lookup doc
+                    || (isSignedIn()
+                        && resource.data.ownerId != request.auth.uid
+                        && request.resource.data.ownerId == request.auth.uid
+                        && request.resource.data.members == [request.auth.uid]
+                        && exists(/databases/$(database)/documents/Transfer_Code_Lookup/$('animal_' + animalId))
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('animal_' + animalId)).data.status == 'pending'
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('animal_' + animalId)).data.senderUid == resource.data.ownerId
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('animal_' + animalId)).data.expiresAt > request.time);
       allow delete: if isSignedIn()
                     && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
@@ -151,7 +160,16 @@ service cloud.firestore {
       allow read:   if isMember(resource.data.members) || isAdmin();
       allow create: if willBeMember()
                     && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isMember(resource.data.members) || isAdmin();
+      allow update: if isMember(resource.data.members) || isAdmin()
+                    // Transfer claim: recipient takes ownership via a pending lookup doc
+                    || (isSignedIn()
+                        && resource.data.ownerId != request.auth.uid
+                        && request.resource.data.ownerId == request.auth.uid
+                        && request.resource.data.members == [request.auth.uid]
+                        && exists(/databases/$(database)/documents/Transfer_Code_Lookup/$('pet_' + petId))
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('pet_' + petId)).data.status == 'pending'
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('pet_' + petId)).data.senderUid == resource.data.ownerId
+                        && get(/databases/$(database)/documents/Transfer_Code_Lookup/$('pet_' + petId)).data.expiresAt > request.time);
       allow delete: if isSignedIn()
                     && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
@@ -502,6 +520,57 @@ service cloud.firestore {
     match /Disease_Risk/{entryId} {
       allow read:  if true;
       allow write: if isAdmin();
+    }
+
+
+    // ──────────────────────────── Transfer codes ───────────────────────────────
+    // Sender creates a 6-char code to transfer ownership of a dependent, pet, or
+    // farm animals to a new user. Recipient claims it by looking up the code.
+
+    match /Transfer_Codes/{code} {
+      // Any signed-in user can read a code to preview before claiming
+      allow read: if isSignedIn();
+
+      // Sender creates the code for their own entities
+      allow create: if isSignedIn()
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // Sender can cancel; any other signed-in user can claim (status → claimed)
+      allow update: if isSignedIn() && (
+        (resource.data.senderUid == request.auth.uid
+          && request.resource.data.status == 'cancelled') ||
+        (resource.data.status == 'pending'
+          && request.resource.data.status == 'claimed'
+          && request.resource.data.claimedBy == request.auth.uid
+          && resource.data.senderUid != request.auth.uid)
+      );
+
+      allow delete: if false;
+    }
+
+
+    // ── Transfer Code Lookup (keyed by entity: pet_{id} / animal_{id}) ──────────
+    // Written by the sender alongside the code; used by Firestore rules on Pets
+    // and FarmAnimals to allow the recipient to take ownership.
+
+    match /Transfer_Code_Lookup/{lookupId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // Sender can cancel; recipient can mark as claimed
+      allow update: if isSignedIn() && (
+        (resource.data.senderUid == request.auth.uid
+          && request.resource.data.status == 'cancelled') ||
+        (resource.data.status == 'pending'
+          && request.resource.data.status == 'claimed'
+          && resource.data.senderUid != request.auth.uid)
+      );
+
+      allow delete: if isSignedIn() && resource.data.senderUid == request.auth.uid;
     }
 
 

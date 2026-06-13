@@ -44,6 +44,7 @@ import { SexualHealthPage } from './pages/SexualHealthPage'
 import { AddSexualHealthRecordPage } from './pages/AddSexualHealthRecordPage'
 import { PublicSexualHealthPage } from './pages/PublicSexualHealthPage'
 import { STILibraryPage } from './pages/STILibraryPage'
+import { ClaimTransferPage } from './pages/ClaimTransferPage'
 
 export default function App() {
   return (
@@ -125,6 +126,7 @@ function AuthGuard() {
       <Route path="/farm/herd/vaccines/add" element={<AddHerdVaccinePage />} />
       <Route path="/farm/:animalId" element={<FarmAnimalDetailPage />} />
       <Route path="/farm/:animalId/vaccines/add" element={<AddFarmAnimalVaccinePage />} />
+      <Route path="/transfer/claim" element={<ClaimTransferPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </AppLayout>

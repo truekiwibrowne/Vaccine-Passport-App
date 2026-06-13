@@ -11,6 +11,8 @@ import { formatDate } from '../utils/dateUtils'
 import { ShareManageModal } from '../components/ui/ShareManageModal'
 import { PetAvatar } from '../components/pets/PetAvatar'
 import { PetFormModal } from '../components/pets/PetFormModal'
+import { TransferCodeModal } from '../components/transfer/TransferCodeModal'
+import { countPetVaccines } from '../services/transferService'
 
 const APP_URL = import.meta.env.VITE_APP_URL || window.location.origin
 
@@ -25,6 +27,8 @@ export function PetVaccinesPage() {
   const [loading, setLoading]   = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
   const [editOpen, setEditOpen]   = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferVaccineCount, setTransferVaccineCount] = useState(0)
 
   useEffect(() => {
     if (!user || !petId) return
@@ -235,6 +239,32 @@ export function PetVaccinesPage() {
               )}
             </div>
 
+            {/* Transfer pet to new owner */}
+            {pet && user?.uid === pet.ownerId && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm p-4">
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">
+                  Transfer Pet
+                </p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
+                  Transfer {pet.name} and their vaccine records to a new owner.
+                </p>
+                <button
+                  onClick={async () => {
+                    if (!petId) return
+                    const count = await countPetVaccines(petId)
+                    setTransferVaccineCount(count)
+                    setTransferOpen(true)
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-700 text-sm font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 active:bg-blue-100 dark:active:bg-blue-900/40 transition-colors"
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                  </svg>
+                  Generate Transfer Code
+                </button>
+              </div>
+            )}
+
             {/* Pet Vaccination Passport QR — below the list */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-4 pt-4 pb-2">
@@ -284,6 +314,18 @@ export function PetVaccinesPage() {
           resourceId={pet.id}
           resourceName={pet.name}
           ownerId={pet.ownerId ?? user?.uid ?? ''}
+        />
+      )}
+
+      {/* Transfer modal */}
+      {transferOpen && pet && user && petId && (
+        <TransferCodeModal
+          senderUid={user.uid}
+          type="pet"
+          entityIds={[petId]}
+          entityNames={[pet.name]}
+          vaccineCount={transferVaccineCount}
+          onClose={() => setTransferOpen(false)}
         />
       )}
     </div>
