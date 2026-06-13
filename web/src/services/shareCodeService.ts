@@ -1,5 +1,5 @@
 import {
-  doc, getDoc, setDoc, updateDoc, writeBatch, Timestamp,
+  doc, getDoc, setDoc, updateDoc, writeBatch, arrayUnion, Timestamp,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { ShareCode } from '../types/shareCode'
@@ -113,16 +113,27 @@ export async function claimShareCode(code: string, recipientUid: string): Promis
   const resourceRef = doc(db, resourceColName(sc.resourceType), sc.resourceId)
   const now = Timestamp.now()
 
-  // Read current members to build the updated array (needed for Firestore rule check)
-  const resourceSnap = await getDoc(resourceRef)
-  if (!resourceSnap.exists()) throw new Error('The resource no longer exists.')
-  const currentMembers: string[] = resourceSnap.data().members ?? []
-  if (currentMembers.includes(recipientUid)) throw new Error('You already have access to this resource.')
+  // Try to detect if recipient is already a member. This read only succeeds if they
+  // already have access — if they get a permissions error they're not yet a member,
+  // which is the expected case; we proceed without failing.
+  try {
+    const resourceSnap = await getDoc(resourceRef)
+    if (resourceSnap.exists()) {
+      const currentMembers: string[] = resourceSnap.data().members ?? []
+      if (currentMembers.includes(recipientUid)) {
+        throw new Error('You already have access to this resource.')
+      }
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message === 'You already have access to this resource.') throw e
+    // Permissions error means they're not a member yet — expected, continue
+  }
 
   const batch = writeBatch(db)
 
-  // Add recipient to members (explicit array update so Firestore rule can check size)
-  batch.update(resourceRef, { members: [...currentMembers, recipientUid] })
+  // arrayUnion avoids needing to read the resource first (which would fail for non-members).
+  // Firestore rules validate the update via the Share_Code_Lookup doc.
+  batch.update(resourceRef, { members: arrayUnion(recipientUid) })
 
   batch.update(doc(db, 'Share_Codes', code), {
     status: 'claimed',
