@@ -511,7 +511,7 @@ export function ProfilePage() {
               Share Invites
             </Button>
             <Button variant="ghost" fullWidth onClick={() => navigate('/transfer/claim')} className="justify-start">
-              Claim Transfer
+              Claim Code
             </Button>
             <Button variant="ghost" fullWidth onClick={() => navigate('/report')} className="justify-start">
               📄 Download Vaccination Report
