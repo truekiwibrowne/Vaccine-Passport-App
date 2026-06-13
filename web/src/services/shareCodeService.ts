@@ -52,6 +52,17 @@ export async function createShareCode(
   const now = Timestamp.now()
   const key = lookupKey(resourceType, resourceId)
 
+  // Cancel any existing pending lookup for this resource before creating a new one.
+  // (batch.set on an existing doc hits the update rule, not create, and would be denied.)
+  const existingSnap = await getDoc(doc(db, 'Share_Code_Lookup', key))
+  if (existingSnap.exists() && existingSnap.data().status === 'pending') {
+    const oldCode = existingSnap.data().code as string
+    const cancelBatch = writeBatch(db)
+    cancelBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
+    cancelBatch.update(doc(db, 'Share_Code_Lookup', key), { status: 'cancelled' })
+    await cancelBatch.commit()
+  }
+
   const batch = writeBatch(db)
 
   batch.set(doc(db, 'Share_Codes', code), {
@@ -74,6 +85,68 @@ export async function createShareCode(
     expiresAt,
     createdAt: now,
   })
+
+  await batch.commit()
+  return code
+}
+
+/** Create a single share code covering multiple farm animals. */
+export async function createFarmGroupShareCode(
+  senderUid: string,
+  animals: Array<{ id: string; name: string }>,
+): Promise<string> {
+  const code = generateCode()
+  const expiresAt = Timestamp.fromDate(new Date(Date.now() + EXPIRY_HOURS * 3_600_000))
+  const now = Timestamp.now()
+
+  // Read all existing lookup docs in parallel, cancel any that are still pending.
+  const keys = animals.map(a => `sanimal_${a.id}`)
+  const lookupSnaps = await Promise.all(keys.map(k => getDoc(doc(db, 'Share_Code_Lookup', k))))
+
+  const pendingByCode = new Map<string, string[]>()
+  for (const snap of lookupSnaps) {
+    if (snap.exists() && snap.data().status === 'pending') {
+      const oldCode = snap.data().code as string
+      if (!pendingByCode.has(oldCode)) pendingByCode.set(oldCode, [])
+      pendingByCode.get(oldCode)!.push(snap.id)
+    }
+  }
+
+  if (pendingByCode.size > 0) {
+    const cancelBatch = writeBatch(db)
+    for (const [oldCode, lookupKeys] of pendingByCode) {
+      cancelBatch.update(doc(db, 'Share_Codes', oldCode), { status: 'cancelled' })
+      for (const k of lookupKeys) {
+        cancelBatch.update(doc(db, 'Share_Code_Lookup', k), { status: 'cancelled' })
+      }
+    }
+    await cancelBatch.commit()
+  }
+
+  const batch = writeBatch(db)
+
+  batch.set(doc(db, 'Share_Codes', code), {
+    code,
+    senderUid,
+    resourceType: 'farmGroup',
+    entityIds: animals.map(a => a.id),
+    entityNames: animals.map(a => a.name),
+    status: 'pending',
+    expiresAt,
+    createdAt: now,
+  })
+
+  for (const animal of animals) {
+    batch.set(doc(db, 'Share_Code_Lookup', `sanimal_${animal.id}`), {
+      senderUid,
+      code,
+      resourceType: 'farmAnimal',
+      resourceId: animal.id,
+      status: 'pending',
+      expiresAt,
+      createdAt: now,
+    })
+  }
 
   await batch.commit()
   return code
@@ -109,42 +182,30 @@ export async function claimShareCode(code: string, recipientUid: string): Promis
   if (isShareCodeExpired(sc)) throw new Error('This code has expired.')
   if (sc.senderUid === recipientUid) throw new Error('You cannot claim your own code.')
 
-  const key = lookupKey(sc.resourceType, sc.resourceId)
-  const resourceRef = doc(db, resourceColName(sc.resourceType), sc.resourceId)
   const now = Timestamp.now()
-
-  // Try to detect if recipient is already a member. This read only succeeds if they
-  // already have access — if they get a permissions error they're not yet a member,
-  // which is the expected case; we proceed without failing.
-  try {
-    const resourceSnap = await getDoc(resourceRef)
-    if (resourceSnap.exists()) {
-      const currentMembers: string[] = resourceSnap.data().members ?? []
-      if (currentMembers.includes(recipientUid)) {
-        throw new Error('You already have access to this resource.')
-      }
-    }
-  } catch (e) {
-    if (e instanceof Error && e.message === 'You already have access to this resource.') throw e
-    // Permissions error means they're not a member yet — expected, continue
-  }
-
   const batch = writeBatch(db)
 
-  // arrayUnion avoids needing to read the resource first (which would fail for non-members).
-  // Firestore rules validate the update via the Share_Code_Lookup doc.
-  batch.update(resourceRef, { members: arrayUnion(recipientUid) })
+  if (sc.resourceType === 'farmGroup') {
+    // Multi-animal group share — update each animal + its lookup doc
+    for (const animalId of (sc.entityIds ?? [])) {
+      batch.update(doc(db, 'FarmAnimals', animalId), { members: arrayUnion(recipientUid) })
+      batch.update(doc(db, 'Share_Code_Lookup', `sanimal_${animalId}`), {
+        status: 'claimed', claimedBy: recipientUid, claimedAt: now,
+      })
+    }
+  } else {
+    // Single-resource share
+    const key = lookupKey(sc.resourceType as ShareResourceType, sc.resourceId!)
+    batch.update(doc(db, resourceColName(sc.resourceType as ShareResourceType), sc.resourceId!), {
+      members: arrayUnion(recipientUid),
+    })
+    batch.update(doc(db, 'Share_Code_Lookup', key), {
+      status: 'claimed', claimedBy: recipientUid, claimedAt: now,
+    })
+  }
 
   batch.update(doc(db, 'Share_Codes', code), {
-    status: 'claimed',
-    claimedBy: recipientUid,
-    claimedAt: now,
-  })
-
-  batch.update(doc(db, 'Share_Code_Lookup', key), {
-    status: 'claimed',
-    claimedBy: recipientUid,
-    claimedAt: now,
+    status: 'claimed', claimedBy: recipientUid, claimedAt: now,
   })
 
   await batch.commit()
@@ -155,11 +216,17 @@ export async function cancelShareCode(code: string, senderUid: string): Promise<
   if (!sc) throw new Error('Code not found.')
   if (sc.senderUid !== senderUid) throw new Error('Not authorised.')
 
-  const key = lookupKey(sc.resourceType, sc.resourceId)
   const batch = writeBatch(db)
-
   batch.update(doc(db, 'Share_Codes', code), { status: 'cancelled' })
-  batch.update(doc(db, 'Share_Code_Lookup', key), { status: 'cancelled' })
+
+  if (sc.resourceType === 'farmGroup') {
+    for (const animalId of (sc.entityIds ?? [])) {
+      batch.update(doc(db, 'Share_Code_Lookup', `sanimal_${animalId}`), { status: 'cancelled' })
+    }
+  } else {
+    const key = lookupKey(sc.resourceType as ShareResourceType, sc.resourceId!)
+    batch.update(doc(db, 'Share_Code_Lookup', key), { status: 'cancelled' })
+  }
 
   await batch.commit()
 }

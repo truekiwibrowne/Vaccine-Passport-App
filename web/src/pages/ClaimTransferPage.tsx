@@ -26,6 +26,7 @@ const SHARE_TYPE_ICON: Record<string, string> = {
   dependent: '👤',
   pet:       '🐾',
   farmAnimal:'🐄',
+  farmGroup: '🐄',
 }
 
 export function ClaimTransferPage() {
@@ -137,7 +138,9 @@ export function ClaimTransferPage() {
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
           {isShare
-            ? `You now have access to ${found.data.resourceName}.`
+            ? found.data.resourceType === 'farmGroup'
+              ? `You now have access to ${(found.data.entityIds ?? []).length} animal${(found.data.entityIds ?? []).length !== 1 ? 's' : ''} on the farm.`
+              : `You now have access to ${found.data.resourceName}.`
             : found.data.type === 'dependent'
               ? `${found.data.vaccineCount} vaccine record${found.data.vaccineCount !== 1 ? 's' : ''} have been added to your personal vaccine history.`
               : found.data.type === 'pet'
@@ -241,7 +244,9 @@ export function ClaimTransferPage() {
                   <p className="text-base font-bold text-gray-900 dark:text-white leading-tight">
                     {found.kind === 'transfer'
                       ? found.data.entityNames.join(', ')
-                      : found.data.resourceName}
+                      : found.data.resourceType === 'farmGroup'
+                        ? `${(found.data.entityIds ?? []).length} Animals`
+                        : found.data.resourceName}
                   </p>
                 </div>
               </div>
@@ -258,6 +263,12 @@ export function ClaimTransferPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600 dark:text-gray-400">Animals</span>
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">{found.data.entityIds.length}</span>
+                </div>
+              )}
+              {found.kind === 'share' && found.data.resourceType === 'farmGroup' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Animals included</span>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">{(found.data.entityIds ?? []).length}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">

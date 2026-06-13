@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getFarmAnimals, archiveFarmAnimal, updateFarmAnimal } from '../services/farmService'
-import { createShareCode } from '../services/shareCodeService'
+import { createFarmGroupShareCode } from '../services/shareCodeService'
 import { countFarmAnimalVaccines } from '../services/transferService'
 import { TransferCodeModal } from '../components/transfer/TransferCodeModal'
 import type { FarmAnimal, FarmSpecies, FarmAnimalStatus } from '../types/farm'
@@ -239,9 +239,10 @@ export function FarmPage() {
 
   // ── Bulk share modal state ──────────────────────────────────────────────────
   const [bulkShareOpen, setBulkShareOpen] = useState(false)
-  const [bulkShareCodes, setBulkShareCodes] = useState<Array<{ id: string; name: string; code: string; error?: string }>>([])
+  const [bulkShareCode, setBulkShareCode] = useState<string | null>(null)
   const [bulkSharing, setBulkSharing] = useState(false)
-  const [bulkShareCopiedAll, setBulkShareCopiedAll] = useState(false)
+  const [bulkShareCopied, setBulkShareCopied] = useState(false)
+  const [bulkShareError, setBulkShareError] = useState<string | null>(null)
 
   // ── Bulk transfer modal state ───────────────────────────────────────────────
   const [transferOpen, setTransferOpen] = useState(false)
@@ -331,33 +332,29 @@ export function FarmPage() {
 
   async function handleOpenBulkShare() {
     if (!user) return
-    setBulkShareCodes([])
-    setBulkShareCopiedAll(false)
+    setBulkShareCode(null)
+    setBulkShareError(null)
+    setBulkShareCopied(false)
     setBulkShareOpen(true)
     setBulkSharing(true)
     const selectedAnimals = animals.filter(a => selectedIds.has(a.id))
-    const results: Array<{ id: string; name: string; code: string; error?: string }> = []
-    for (const animal of selectedAnimals) {
-      const label = animal.name ?? `#${animal.tagNumber}`
-      try {
-        const code = await createShareCode(user.uid, 'farmAnimal', animal.id, label)
-        results.push({ id: animal.id, name: label, code })
-      } catch (e) {
-        results.push({ id: animal.id, name: label, code: '', error: (e as Error)?.message ?? 'Failed' })
-      }
+    try {
+      const code = await createFarmGroupShareCode(
+        user.uid,
+        selectedAnimals.map(a => ({ id: a.id, name: a.name ?? `#${a.tagNumber}` })),
+      )
+      setBulkShareCode(code)
+    } catch (e) {
+      setBulkShareError((e as Error)?.message ?? 'Failed to generate code.')
     }
-    setBulkShareCodes(results)
     setBulkSharing(false)
   }
 
-  function handleCopyAllCodes() {
-    const text = bulkShareCodes
-      .filter(r => r.code)
-      .map(r => `${r.name}: ${r.code}`)
-      .join('\n')
-    navigator.clipboard.writeText(text)
-    setBulkShareCopiedAll(true)
-    setTimeout(() => setBulkShareCopiedAll(false), 2000)
+  function handleCopyShareCode() {
+    if (!bulkShareCode) return
+    navigator.clipboard.writeText(bulkShareCode)
+    setBulkShareCopied(true)
+    setTimeout(() => setBulkShareCopied(false), 2000)
   }
 
   // ── Bulk edit ───────────────────────────────────────────────────────────────
@@ -1107,60 +1104,52 @@ export function FarmPage() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Generating share codes…</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Generating share code…</p>
               </div>
+            ) : bulkShareError ? (
+              <>
+                <p className="text-sm text-red-500 mb-4">{bulkShareError}</p>
+                <button
+                  onClick={() => setBulkShareOpen(false)}
+                  className="w-full py-3 rounded-xl bg-green-700 text-white text-sm font-semibold active:bg-green-800"
+                >
+                  Close
+                </button>
+              </>
             ) : (
               <>
                 <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-                  Share each code with the person you're inviting. They enter it at <strong className="text-gray-500 dark:text-gray-400">Profile → Claim Code</strong>.
+                  Share this single code with the person you're inviting. They enter it at{' '}
+                  <strong className="text-gray-500 dark:text-gray-400">Profile → Claim Code</strong> to get access to all {selectedIds.size} animals at once.
                 </p>
 
-                <div className="space-y-2 mb-4 max-h-64 overflow-y-auto">
-                  {bulkShareCodes.map(r => (
-                    <div key={r.id} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl px-3 py-2.5">
-                      <span className="flex-1 text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{r.name}</span>
-                      {r.error ? (
-                        <span className="text-xs text-red-500">{r.error}</span>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm font-bold tracking-widest text-gray-900 dark:text-white">{r.code}</span>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(r.code)}
-                            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex gap-3">
-                  {bulkShareCodes.some(r => r.code) && (
-                    <button
-                      onClick={handleCopyAllCodes}
-                      className="flex-1 py-3 rounded-xl border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-700 dark:text-gray-300 active:bg-gray-50 flex items-center justify-center gap-1.5"
-                    >
-                      {bulkShareCopiedAll ? (
-                        <>
-                          <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                          Copied
-                        </>
-                      ) : 'Copy All'}
-                    </button>
-                  )}
+                <div className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-2xl px-4 py-4 mb-4">
+                  <span className="flex-1 font-mono text-2xl font-bold tracking-widest text-gray-900 dark:text-white text-center">
+                    {bulkShareCode}
+                  </span>
                   <button
-                    onClick={() => setBulkShareOpen(false)}
-                    className="flex-1 py-3 rounded-xl bg-green-700 text-white text-sm font-semibold active:bg-green-800"
+                    onClick={handleCopyShareCode}
+                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                    title="Copy code"
                   >
-                    Done
+                    {bulkShareCopied ? (
+                      <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
                   </button>
                 </div>
+
+                <button
+                  onClick={() => setBulkShareOpen(false)}
+                  className="w-full py-3 rounded-xl bg-green-700 text-white text-sm font-semibold active:bg-green-800"
+                >
+                  Done
+                </button>
               </>
             )}
           </div>

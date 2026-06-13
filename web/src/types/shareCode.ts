@@ -6,9 +6,13 @@ export type ShareCodeStatus = 'pending' | 'claimed' | 'cancelled'
 export interface ShareCode {
   code: string
   senderUid: string
-  resourceType: ShareResourceType
-  resourceId: string
-  resourceName: string
+  // Single-resource share (pet, dependent, farmAnimal)
+  resourceType: ShareResourceType | 'farmGroup'
+  resourceId?: string
+  resourceName?: string
+  // Multi-animal group share (farmGroup)
+  entityIds?: string[]
+  entityNames?: string[]
   status: ShareCodeStatus
   expiresAt: Timestamp
   claimedBy?: string
