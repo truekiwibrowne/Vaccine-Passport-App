@@ -47,6 +47,26 @@ export async function createShareCode(
   resourceId: string,
   resourceName: string,
 ): Promise<string> {
+  // Pets and Dependents have a legacy path (User_Data/{uid}/...). If the document
+  // doesn't exist yet at the top-level collection, migrate it so the share claim
+  // can write members[] to the canonical location.
+  const topRef = doc(db, resourceColName(resourceType), resourceId)
+  const topSnap = await getDoc(topRef)
+  if (!topSnap.exists()) {
+    const legacyRef =
+      resourceType === 'pet'
+        ? doc(db, 'User_Data', senderUid, 'Pets', resourceId)
+        : resourceType === 'dependent'
+          ? doc(db, 'User_Data', senderUid, 'Dependents', resourceId)
+          : null
+    if (legacyRef) {
+      const legacySnap = await getDoc(legacyRef)
+      if (legacySnap.exists()) {
+        await setDoc(topRef, { ...legacySnap.data(), ownerId: senderUid, members: [senderUid] })
+      }
+    }
+  }
+
   const code = generateCode()
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + EXPIRY_HOURS * 3_600_000))
   const now = Timestamp.now()
