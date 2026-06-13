@@ -86,14 +86,18 @@ export async function sendShareInvite(
 ): Promise<string> {
   const normalEmail = inviteeEmail.trim().toLowerCase()
 
-  // Check for existing pending invite for this resource + email
+  // Check for existing pending invite FROM THIS INVITER for this resource.
+  // Must include inviterUid in the query so every returned doc satisfies the
+  // Firestore read rule (resource.data.inviterUid == request.auth.uid).
   const existing = await getDocs(query(
     collection(db, 'ShareInvites'),
+    where('inviterUid', '==', inviterUid),
     where('resourceId', '==', resourceId),
-    where('inviteeEmail', '==', normalEmail),
     where('status', '==', 'pending'),
   ))
-  if (!existing.empty) throw new Error('A pending invite already exists for this email.')
+  if (existing.docs.some(d => d.data().inviteeEmail === normalEmail)) {
+    throw new Error('A pending invite already exists for this email.')
+  }
 
   // Check if they're already a member
   const resourceRef = doc(db, resourceColName(resourceType), resourceId)
@@ -242,12 +246,14 @@ export async function getResourceMembers(
 }
 
 /**
- * Get pending invites sent by the owner for a specific resource
- * (so the share UI can show "awaiting response" entries).
+ * Get pending invites sent by a specific owner for a specific resource.
+ * inviterUid must be included so every returned doc satisfies the Firestore
+ * read rule (resource.data.inviterUid == request.auth.uid).
  */
-export async function getPendingInvitesForResource(resourceId: string): Promise<ShareInvite[]> {
+export async function getPendingInvitesForResource(resourceId: string, inviterUid: string): Promise<ShareInvite[]> {
   const snap = await getDocs(query(
     collection(db, 'ShareInvites'),
+    where('inviterUid', '==', inviterUid),
     where('resourceId', '==', resourceId),
     where('status', '==', 'pending'),
   ))

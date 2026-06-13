@@ -52,7 +52,7 @@ export function ShareManageModal({
     try {
       const [m, p] = await Promise.all([
         getResourceMembers(resourceType, resourceId),
-        getPendingInvitesForResource(resourceId),
+        user ? getPendingInvitesForResource(resourceId, user.uid) : Promise.resolve([]),
       ])
       setMembers(m)
       setPendingInvites(p)

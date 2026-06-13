@@ -212,7 +212,7 @@ export function TransferCodeModal({ senderUid, type, entityIds, entityNames, vac
               <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span>Valid for 48 hours. The recipient enters this at <strong className="text-gray-500">Menu → Claim Transfer</strong>.</span>
+              <span>Valid for 48 hours. The recipient goes to <strong className="text-gray-500">Profile → Claim Transfer</strong> to enter this code.</span>
             </div>
 
             <div className="flex gap-3">
