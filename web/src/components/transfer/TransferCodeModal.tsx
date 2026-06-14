@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   createTransferCode, cancelTransferCode, getSenderPendingTransfers,
-  timeUntilExpiry, isCodeExpired,
+  isCodeExpired,
 } from '../../services/transferService'
 import type { TransferCode, TransferType } from '../../types/transfer'
 
@@ -15,18 +15,18 @@ interface Props {
 }
 
 export function TransferCodeModal({ senderUid, type, entityIds, entityNames, vaccineCount, onClose }: Props) {
-  const [phase, setPhase]         = useState<'loading' | 'ready' | 'generating' | 'error'>('loading')
-  const [existing, setExisting]   = useState<TransferCode | null>(null)
-  const [code, setCode]           = useState<string | null>(null)
-  const [copied, setCopied]       = useState(false)
+  const [phase, setPhase]           = useState<'loading' | 'ready' | 'error'>('loading')
+  const [generating, setGenerating] = useState(false)
+  const [existing, setExisting]     = useState<TransferCode | null>(null)
+  const [code, setCode]             = useState<string | null>(null)
+  const [copied, setCopied]         = useState(false)
   const [cancelling, setCancelling] = useState(false)
-  const [error, setError]         = useState<string | null>(null)
+  const [error, setError]           = useState<string | null>(null)
 
   // Check if there's already an active code for these entities
   useEffect(() => {
     getSenderPendingTransfers(senderUid)
       .then(transfers => {
-        // Find a matching pending code for this exact set of entities
         const match = transfers.find(t =>
           t.type === type &&
           t.entityIds.length === entityIds.length &&
@@ -43,7 +43,7 @@ export function TransferCodeModal({ senderUid, type, entityIds, entityNames, vac
   }, [senderUid, type, entityIds])
 
   async function handleGenerate() {
-    setPhase('generating')
+    setGenerating(true)
     setError(null)
     try {
       const newCode = await createTransferCode(senderUid, type, entityIds, entityNames, vaccineCount)
@@ -53,6 +53,8 @@ export function TransferCodeModal({ senderUid, type, entityIds, entityNames, vac
     } catch (e) {
       setError((e as Error)?.message ?? 'Failed to generate code.')
       setPhase('error')
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -152,10 +154,10 @@ export function TransferCodeModal({ senderUid, type, entityIds, entityNames, vac
 
             <button
               onClick={handleGenerate}
-              disabled={phase === 'generating'}
+              disabled={generating}
               className="w-full py-3.5 bg-blue-600 text-white font-semibold rounded-2xl disabled:opacity-60 active:bg-blue-700 flex items-center justify-center gap-2 mb-3"
             >
-              {phase === 'generating' ? (
+              {generating ? (
                 <>
                   <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

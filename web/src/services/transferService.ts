@@ -10,7 +10,7 @@
  */
 
 import {
-  collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs,
   query, where, orderBy, Timestamp, writeBatch,
 } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -68,7 +68,7 @@ export async function createTransferCode(
   // For dependent transfers, embed a vaccine snapshot in the doc so the recipient
   // can read them without being a member of the dependent — no extra rule needed.
   // The sender has access to both the migrated top-level path and the legacy path.
-  let vaccines: Record<string, unknown>[] = []
+  let vaccines: Omit<UserVaccine, 'user_vaccine_id'>[] = []
   if (type === 'dependent') {
     const depId = entityIds[0]
     let vaxSnap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
@@ -79,7 +79,7 @@ export async function createTransferCode(
         )
       } catch { /* legacy path inaccessible — skip */ }
     }
-    vaccines = vaxSnap.docs.map(d => d.data())
+    vaccines = vaxSnap.docs.map(d => d.data() as Omit<UserVaccine, 'user_vaccine_id'>)
   }
 
   const payload: Omit<TransferCode, 'code'> = {

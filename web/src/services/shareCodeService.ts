@@ -1,5 +1,5 @@
 import {
-  doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, arrayUnion, Timestamp, collection,
+  doc, getDoc, getDocs, setDoc, writeBatch, arrayUnion, Timestamp, collection,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { ShareCode } from '../types/shareCode'
