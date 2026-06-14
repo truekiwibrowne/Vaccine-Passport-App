@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { UserVaccine } from './vaccine'
 
 export type TransferType = 'dependent' | 'pet' | 'farm_animals'
 export type TransferStatus = 'pending' | 'claimed' | 'cancelled'
@@ -17,4 +18,6 @@ export interface TransferCode {
   claimedBy?: string
   claimedAt?: Timestamp
   createdAt: Timestamp
+  /** Vaccine snapshot embedded for dependent transfers — recipient reads from here */
+  vaccines?: Omit<UserVaccine, 'user_vaccine_id'>[]
 }

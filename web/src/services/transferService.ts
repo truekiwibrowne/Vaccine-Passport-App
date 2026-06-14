@@ -65,6 +65,23 @@ export async function createTransferCode(
   const now = Timestamp.now()
   const expiresAt = Timestamp.fromMillis(now.toMillis() + EXPIRY_HOURS * 60 * 60 * 1000)
 
+  // For dependent transfers, embed a vaccine snapshot in the doc so the recipient
+  // can read them without being a member of the dependent — no extra rule needed.
+  // The sender has access to both the migrated top-level path and the legacy path.
+  let vaccines: Record<string, unknown>[] = []
+  if (type === 'dependent') {
+    const depId = entityIds[0]
+    let vaxSnap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
+    if (vaxSnap.empty) {
+      try {
+        vaxSnap = await getDocs(
+          collection(db, 'User_Data', senderUid, 'Dependents', depId, 'Vaccines'),
+        )
+      } catch { /* legacy path inaccessible — skip */ }
+    }
+    vaccines = vaxSnap.docs.map(d => d.data())
+  }
+
   const payload: Omit<TransferCode, 'code'> = {
     senderUid,
     type,
@@ -74,6 +91,7 @@ export async function createTransferCode(
     status: 'pending',
     expiresAt,
     createdAt: now,
+    ...(vaccines.length > 0 ? { vaccines } : {}),
   }
 
   const batch = writeBatch(db)
@@ -88,30 +106,6 @@ export async function createTransferCode(
   }
 
   await batch.commit()
-
-  // For dependent transfers: snapshot vaccines into Transfer_Codes/{code}/Vaccines
-  // so the recipient can read them without being a member of the dependent.
-  // The Transfer_Code doc must exist first (rules look it up to authorise the write).
-  if (type === 'dependent') {
-    const depId = entityIds[0]
-    // Try top-level migrated path first, fall back to legacy per-user path
-    let vaxSnap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
-    if (vaxSnap.empty) {
-      try {
-        vaxSnap = await getDocs(
-          collection(db, 'User_Data', senderUid, 'Dependents', depId, 'Vaccines'),
-        )
-      } catch { /* legacy path inaccessible — skip */ }
-    }
-    if (!vaxSnap.empty) {
-      const vaxBatch = writeBatch(db)
-      vaxSnap.docs.forEach(d =>
-        vaxBatch.set(doc(db, 'Transfer_Codes', code, 'Vaccines', d.id), d.data()),
-      )
-      await vaxBatch.commit()
-    }
-  }
-
   return code
 }
 
@@ -178,16 +172,13 @@ async function _claimDependent(
   transfer: TransferCode,
   recipientUid: string,
 ): Promise<void> {
-  // Vaccines were snapshotted into Transfer_Codes/{code}/Vaccines at creation time.
-  // Reading from Dependents/{depId}/Vaccines would be denied — the recipient is not a member.
-  const vacSnap = await getDocs(collection(db, 'Transfer_Codes', transfer.code, 'Vaccines'))
-  const vaccines: UserVaccine[] = vacSnap.docs.map(d => ({ ...d.data(), user_vaccine_id: d.id }) as UserVaccine)
-
+  // Vaccines are embedded in the transfer code doc — no separate read required,
+  // and no membership check is needed on the dependent.
+  const vaccines = transfer.vaccines ?? []
   const now = isoNow()
   for (const vax of vaccines) {
-    const { user_vaccine_id: _id, ...rest } = vax
     const newRef = doc(collection(db, 'User_Data', recipientUid, 'Vaccines'))
-    batch.set(newRef, { ...rest, user_id: recipientUid, Created: now, Updated: now })
+    batch.set(newRef, { ...vax, user_id: recipientUid, Created: now, Updated: now })
   }
 }
 
