@@ -8,6 +8,30 @@ When bumping the version, update **both** `web/package.json` and `web/src/versio
 
 ---
 
+## [0.2.0] — 2026-06-14 · Share-by-code system, farm group sharing, vaccine migration
+
+### Added
+- **Share-by-code system** — owners of pets, dependents, and farm animals can now generate a 6-character share code (48-hour expiry) that grants another user collaborative read/write access without transferring ownership. The recipient enters the code at Profile → Claim Code. Both parties retain access after the share; the owner can cancel a code at any time before it's claimed.
+- **Farm group share codes** — when sharing multiple farm animals, a single code covers all selected animals. The recipient claims one code to gain access to the whole group, eliminating the need for per-animal codes (important for large herds).
+- **Claim Code page** (`/claim`) — unified page for claiming both share codes and transfer codes. Shows a live preview of what is being shared/transferred (type icon, name/count, expiry) before the user confirms.
+- **Share access modal on pet, dependent, and farm pages** — "Manage Access" / share icon opens a bottom sheet showing the current share code (or a "Generate" button if none exists). Supports cancel and regeneration.
+
+### Fixed
+- **Share code claim: "Missing or insufficient permissions"** — the share-claim Firestore update rule incorrectly required `senderUid in resource.data.members`, which failed when `members` was null/missing on documents that had never been shared before.
+- **Re-opening share modal after dismissal** — `batch.set()` on an existing `Share_Code_Lookup` document (any status) is evaluated as an update by Firestore rules, not a create. Fixed by deleting the old lookup doc before creating a new pending one.
+- **Cannot generate new share code after cancelling** — same root cause as above; the fix now handles all existing statuses (pending, cancelled, claimed), not just pending.
+- **Share failing for legacy pets/dependents** — pets and dependents created before the top-level collection migration only existed at `User_Data/{uid}/Pets|Dependents/{id}`. Claiming tried to update a non-existent top-level doc (permission denied). Fixed by migrating the document to the top-level collection when generating a share code.
+- **Permission denied reading non-existent top-level doc** — `getDoc` on a non-existent document is denied by Firestore rules when membership is required (resource is null → membership check fails). Wrapped in try/catch and treated as "not found."
+- **Shared users couldn't see vaccine records** — vaccines for legacy pets/dependents lived at `User_Data/{uid}/Pets|Dependents/{id}/Vaccines`, which shared users cannot read. Fixed with two strategies: (1) eager migration copies vaccines to the top-level subcollection when the share code is generated; (2) lazy migration copies them the next time the owner views the vaccine page.
+- **Dependent transfer: no vaccines copied** — `claimTransfer` read vaccines from `Dependents/{depId}/Vaccines`, but the recipient is not a member of the dependent so Firestore denied the read. Fixed by embedding a vaccine snapshot directly in the `Transfer_Codes/{code}` document at creation time (sender has full access; no new rule needed). The recipient reads the snapshot from the already-fetched transfer code doc.
+- **Dependent transfer vaccine count showing 0** — `countDependentVaccines` only checked the top-level path. Now also falls back to the legacy `User_Data/{uid}/Dependents/{id}/Vaccines` path so the count in the transfer modal is accurate.
+
+### Changed
+- `Share_Code_Lookup` delete rule updated: sender can delete a lookup doc regardless of its status (previously only allowed for pending docs).
+- Farm share modal updated to show a single shared code for all selected animals instead of one code per animal.
+
+---
+
 ## [0.1.4] — 2026-06-09 · Disease risk maps, entry requirements, PHR cross-device fixes
 
 ### Added

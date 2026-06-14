@@ -7,7 +7,7 @@
  *   MINOR — new features / significant improvements
  *   PATCH — bug fixes and small tweaks
  */
-export const APP_VERSION = '0.1.4'
+export const APP_VERSION = '0.2.0'
 
 /** Human-readable release date for this version */
-export const RELEASE_DATE = '2026-06-09'
+export const RELEASE_DATE = '2026-06-14'
