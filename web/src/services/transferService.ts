@@ -88,6 +88,30 @@ export async function createTransferCode(
   }
 
   await batch.commit()
+
+  // For dependent transfers: snapshot vaccines into Transfer_Codes/{code}/Vaccines
+  // so the recipient can read them without being a member of the dependent.
+  // The Transfer_Code doc must exist first (rules look it up to authorise the write).
+  if (type === 'dependent') {
+    const depId = entityIds[0]
+    // Try top-level migrated path first, fall back to legacy per-user path
+    let vaxSnap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
+    if (vaxSnap.empty) {
+      try {
+        vaxSnap = await getDocs(
+          collection(db, 'User_Data', senderUid, 'Dependents', depId, 'Vaccines'),
+        )
+      } catch { /* legacy path inaccessible — skip */ }
+    }
+    if (!vaxSnap.empty) {
+      const vaxBatch = writeBatch(db)
+      vaxSnap.docs.forEach(d =>
+        vaxBatch.set(doc(db, 'Transfer_Codes', code, 'Vaccines', d.id), d.data()),
+      )
+      await vaxBatch.commit()
+    }
+  }
+
   return code
 }
 
@@ -154,13 +178,11 @@ async function _claimDependent(
   transfer: TransferCode,
   recipientUid: string,
 ): Promise<void> {
-  const depId = transfer.entityIds[0]
-
-  // Read vaccines from Dependents/{depId}/Vaccines
-  const vacSnap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
+  // Vaccines were snapshotted into Transfer_Codes/{code}/Vaccines at creation time.
+  // Reading from Dependents/{depId}/Vaccines would be denied — the recipient is not a member.
+  const vacSnap = await getDocs(collection(db, 'Transfer_Codes', transfer.code, 'Vaccines'))
   const vaccines: UserVaccine[] = vacSnap.docs.map(d => ({ ...d.data(), user_vaccine_id: d.id }) as UserVaccine)
 
-  // Copy each vaccine into the recipient's personal vaccine collection
   const now = isoNow()
   for (const vax of vaccines) {
     const { user_vaccine_id: _id, ...rest } = vax
@@ -257,9 +279,13 @@ export function timeUntilExpiry(transfer: TransferCode): string {
 }
 
 // Used to pre-count vaccines when creating a code for dependents
-export async function countDependentVaccines(depId: string): Promise<number> {
+export async function countDependentVaccines(depId: string, uid: string): Promise<number> {
   const snap = await getDocs(collection(db, 'Dependents', depId, 'Vaccines'))
-  return snap.size
+  if (!snap.empty) return snap.size
+  try {
+    const legacySnap = await getDocs(collection(db, 'User_Data', uid, 'Dependents', depId, 'Vaccines'))
+    return legacySnap.size
+  } catch { return 0 }
 }
 
 export async function countPetVaccines(petId: string): Promise<number> {

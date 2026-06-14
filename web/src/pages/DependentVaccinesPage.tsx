@@ -140,7 +140,7 @@ export function DependentVaccinesPage() {
           {dependent && user?.uid === dependent.ownerId && (
             <button
               onClick={async () => {
-                const count = await countDependentVaccines(dependent.id)
+                const count = await countDependentVaccines(dependent.id, user!.uid)
                 setTransferVaccineCount(count)
                 setTransferOpen(true)
               }}

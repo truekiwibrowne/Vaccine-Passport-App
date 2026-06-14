@@ -616,6 +616,15 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Dependent vaccine snapshot — written by sender at code creation, read by recipient at claim.
+    // Kept in the transfer code's subcollection so the recipient can read without being a member
+    // of the dependent. The sender must exist as the code's senderUid to write here.
+    match /Transfer_Codes/{code}/Vaccines/{vaccineId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && get(/databases/$(database)/documents/Transfer_Codes/$(code)).data.senderUid == request.auth.uid;
+    }
+
 
     // ── Transfer Code Lookup (keyed by entity: pet_{id} / animal_{id}) ──────────
     // Written by the sender alongside the code; used by Firestore rules on Pets
