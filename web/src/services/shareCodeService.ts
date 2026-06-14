@@ -1,5 +1,5 @@
 import {
-  doc, getDoc, setDoc, updateDoc, writeBatch, arrayUnion, Timestamp,
+  doc, getDoc, getDocs, setDoc, updateDoc, writeBatch, arrayUnion, Timestamp, collection,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { ShareCode } from '../types/shareCode'
@@ -64,9 +64,21 @@ export async function createShareCode(
         const legacySnap = await getDoc(legacyRef)
         if (legacySnap.exists()) {
           await setDoc(topRef, { ...legacySnap.data(), ownerId: senderUid, members: [senderUid] })
+
+          // Also migrate vaccines so shared users can see them
+          const legacyVaxCol = resourceType === 'pet'
+            ? collection(db, 'User_Data', senderUid, 'Pets', resourceId, 'Vaccines')
+            : collection(db, 'User_Data', senderUid, 'Dependents', resourceId, 'Vaccines')
+          const topVaxCol = collection(db, resourceColName(resourceType), resourceId, 'Vaccines')
+          const vaxSnap = await getDocs(legacyVaxCol)
+          if (!vaxSnap.empty) {
+            const vaxBatch = writeBatch(db)
+            vaxSnap.docs.forEach(d => vaxBatch.set(doc(topVaxCol, d.id), d.data()))
+            await vaxBatch.commit()
+          }
         }
       } catch {
-        // Legacy doc also unreadable — resource must already exist at top level or is inaccessible.
+        // Legacy doc unreadable — resource must already exist at top level or is inaccessible.
       }
     }
   }

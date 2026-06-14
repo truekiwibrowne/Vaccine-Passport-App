@@ -7,7 +7,7 @@
 
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, arrayUnion, arrayRemove,
+  query, where, orderBy, arrayUnion, arrayRemove, writeBatch,
 } from 'firebase/firestore'
 export { deleteField } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -107,6 +107,19 @@ export async function getPetVaccines(uid: string, petId: string): Promise<PetVac
   const legacySnap = await getDocs(
     query(collection(db, 'User_Data', uid, 'Pets', petId, 'Vaccines'), orderBy('date_administration', 'desc')),
   )
+
+  // If legacy vaccines exist and the top-level doc is present, migrate them up so
+  // shared users (who can't read User_Data/{uid}/...) can see the records.
+  if (!legacySnap.empty) {
+    try {
+      if ((await getDoc(doc(petsCol(), petId))).exists()) {
+        const batch = writeBatch(db)
+        legacySnap.docs.forEach(d => batch.set(doc(petVaxCol(petId), d.id), d.data()))
+        await batch.commit()
+      }
+    } catch { /* non-fatal — return legacy vaccines regardless */ }
+  }
+
   return legacySnap.docs.map(d => ({ ...d.data(), pet_vaccine_id: d.id }) as PetVaccine)
 }
 

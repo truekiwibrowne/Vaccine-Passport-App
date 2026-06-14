@@ -7,7 +7,7 @@
 
 import {
   collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, arrayUnion, arrayRemove,
+  query, where, orderBy, arrayUnion, arrayRemove, writeBatch,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import type { Dependent } from '../types/dependent'
@@ -96,6 +96,19 @@ export async function getDependentVaccines(uid: string, depId: string): Promise<
   const legacySnap = await getDocs(
     query(collection(db, 'User_Data', uid, 'Dependents', depId, 'Vaccines'), orderBy('date_administration', 'desc')),
   )
+
+  // If legacy vaccines exist and the top-level doc is present, migrate them up so
+  // shared users (who can't read User_Data/{uid}/...) can see the records.
+  if (!legacySnap.empty) {
+    try {
+      if ((await getDoc(doc(depsCol(), depId))).exists()) {
+        const batch = writeBatch(db)
+        legacySnap.docs.forEach(d => batch.set(doc(depVaxCol(depId), d.id), d.data()))
+        await batch.commit()
+      }
+    } catch { /* non-fatal — return legacy vaccines regardless */ }
+  }
+
   return legacySnap.docs.map(d => ({ ...d.data(), user_vaccine_id: d.id }) as UserVaccine)
 }
 
